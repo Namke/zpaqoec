@@ -1,6 +1,11 @@
 # Worklog
 
-## 0.3.0 - OEC `.idx` cache milestone
+## 0.3.1 - single-part compatibility
+
+- Added exact-file single archive detection, minimum EC-first init ordering, zero-index/IDX generation, OEC read routing, and single-file add coverage.
+- Added fault injection proving `.ec` survives a failed native zero-index generation.
+
+## 0.3.1 - OEC `.idx` cache milestone
 
 Implemented a real disposable, mmap-backed cache layer without changing any ZPAQ archive part bytes.
 

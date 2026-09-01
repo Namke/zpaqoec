@@ -42,28 +42,40 @@ int zpaq_main_internal(int argc, const char** argv) {
   for(int i=3;i+1<argc;++i) if(std::string(argv[i])=="-index") idx=argv[i+1];
 
   if(cmd=="a") {
-    if(!splitpat(arc,prefix,suffix,digits)) return 3;
     if(idx.empty()) return 4;
-    unsigned n=1;
-    for(;;++n){ std::string p=pnum(prefix,suffix,digits,n); if(!ex(p)) { arc=p; break; } }
-    FILE* f=fopen(arc.c_str(),"wb"); if(!f)return 5;
-    for(int i=0;i<3*1024*1024+123;++i) fputc((i*17+n*31)&255,f); fclose(f);
-    FILE* ix=fopen(idx.c_str(),"ab"); if(!ix)return 6; std::fprintf(ix,"part=%u %s\n",n,arc.c_str()); fclose(ix);
-    std::printf("fake add wrote %s and %s\n",arc.c_str(),idx.c_str());
+    if(splitpat(arc,prefix,suffix,digits)) {
+      unsigned n=1;
+      for(;;++n){ std::string p=pnum(prefix,suffix,digits,n); if(!ex(p)) { arc=p; break; } }
+      FILE* f=fopen(arc.c_str(),"wb"); if(!f)return 5;
+      for(int i=0;i<3*1024*1024+123;++i) fputc((i*17+n*31)&255,f); fclose(f);
+      FILE* ix=fopen(idx.c_str(),"ab"); if(!ix)return 6; std::fprintf(ix,"part=%u %s\n",n,arc.c_str()); fclose(ix);
+      std::printf("fake add wrote %s and %s\n",arc.c_str(),idx.c_str());
+      return 0;
+    }
+    if(!ex(arc) || !ex(idx)) return 3;
+    FILE* f=fopen(arc.c_str(),"ab"); if(!f)return 5;
+    for(int i=0;i<512*1024+77;++i) fputc((i*19+41)&255,f); fclose(f);
+    FILE* ix=fopen(idx.c_str(),"ab"); if(!ix)return 6; std::fprintf(ix,"single-update %s\n",arc.c_str()); fclose(ix);
+    std::printf("fake single add updated %s and %s\n",arc.c_str(),idx.c_str());
     return 0;
   }
 
   if(cmd=="x" && !idx.empty()) {
-    if(!splitpat(arc,prefix,suffix,digits)) return 3;
     FILE* ix=fopen(idx.c_str(),"wb"); if(!ix)return 6;
-    unsigned count=0;
-    for(unsigned n=1;;++n){
-      std::string p=pnum(prefix,suffix,digits,n); if(!ex(p)) break;
-      std::fprintf(ix,"part=%u %s\n",n,p.c_str()); ++count;
+    if(splitpat(arc,prefix,suffix,digits)) {
+      unsigned count=0;
+      for(unsigned n=1;;++n){
+        std::string p=pnum(prefix,suffix,digits,n); if(!ex(p)) break;
+        std::fprintf(ix,"part=%u %s\n",n,p.c_str()); ++count;
+      }
+      fclose(ix);
+      if(!count) { std::remove(idx.c_str()); return 7; }
+      std::printf("fake extract-index rebuilt %s from %u parts\n",idx.c_str(),count);
+      return 0;
     }
-    fclose(ix);
-    if(!count) { std::remove(idx.c_str()); return 7; }
-    std::printf("fake extract-index rebuilt %s from %u parts\n",idx.c_str(),count);
+    if(!ex(arc) || arc.find("failindex")!=std::string::npos) { fclose(ix); std::remove(idx.c_str()); return 7; }
+    std::fprintf(ix,"single=%s\n",arc.c_str()); fclose(ix);
+    std::printf("fake extract-index rebuilt %s from single %s\n",idx.c_str(),arc.c_str());
     return 0;
   }
 
@@ -75,8 +87,11 @@ int zpaq_main_internal(int argc, const char** argv) {
   }
 
   if(cmd=="x" || cmd=="e") {
-    if(!splitpat(arc,prefix,suffix,digits)) { std::fprintf(stderr,"fake extract command requires multipart pattern\n"); return 22; }
-    if(!ex(pnum(prefix,suffix,digits,1))) return 23;
+    if(splitpat(arc,prefix,suffix,digits)) {
+      if(!ex(pnum(prefix,suffix,digits,1))) return 23;
+    } else if(!ex(arc)) {
+      std::fprintf(stderr,"fake extract command data not found\n"); return 22;
+    }
     std::printf("fake %s payload from %s\n",cmd.c_str(),arc.c_str());
     return 0;
   }

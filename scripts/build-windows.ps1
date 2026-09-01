@@ -228,7 +228,7 @@ The binary compiled, but the OEC dispatcher is not on the executable command pat
 
 Assert-OecOutput -Label 'no-arg OEC help' -CommandArgs @() -Needle 'OEC (Optimize + Error Correction)'
 Assert-OecOutput -Label 'oec_h dispatcher' -CommandArgs @('oec_h') -Needle 'OEC (Optimize + Error Correction)'
-Assert-OecOutput -Label 'oec_version dispatcher' -CommandArgs @('oec_version') -Needle 'zpaqoec OEC overlay 0.3.0'
+Assert-OecOutput -Label 'oec_version dispatcher' -CommandArgs @('oec_version') -Needle 'zpaqoec OEC overlay 0.3.1'
 # Argument-sensitive smoke: this must reach the oecinit parser (not no-arg help).
 # Missing ARCHIVE is expected to return 2 and print oecinit usage.
 Assert-OecOutput -Label 'oecinit argv dispatch' -CommandArgs @('oecinit') -Needle 'Initialize/retrofit OEC archive' -ExpectedExit 2
@@ -261,7 +261,7 @@ if (-not [string]::IsNullOrWhiteSpace($InstallTo)) {
   $SavedBuilt = $BuiltExe
   $BuiltExe = $Installed
   try {
-    Assert-OecOutput -Label 'installed oec_version dispatcher' -CommandArgs @('oec_version') -Needle 'zpaqoec OEC overlay 0.3.0'
+    Assert-OecOutput -Label 'installed oec_version dispatcher' -CommandArgs @('oec_version') -Needle 'zpaqoec OEC overlay 0.3.1'
   } finally {
     $BuiltExe = $SavedBuilt
   }

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1 - legacy single-part OEC mode
+
+- `oecinit` / `oec_init` now detects an exact existing single-file archive such as `archive.zpaq` instead of blindly expanding it to `archive.zpaq.???`.
+- Single-file layout keeps the original payload untouched and creates `archive.zpaq.ec`, `archive.000.zpaq`, `archive.000.zpaq.ec`, and `archive.idx`.
+- Data EC is created **before** zero-part generation in single-file mode. If native `x -index` fails, the original archive still retains its minimum `.ec` protection and OEC returns a partial-failure status.
+- `oec_l`, `oec_i`, `oec_x`, `oec_e`, `oec_idx`, and `oec_a` now detect exact existing single-file archives and route metadata/payload correctly.
+- `oec_a archive.zpaq ...` appends to the existing single archive using `archive.000.zpaq` as its external index and regenerates the archive EC sidecar.
+- Multipart behavior and on-disk ZPAQ/EC/IDX formats are unchanged.
+
 ## 0.3.0 - mmap `.idx` acceleration cache
 
 - Add `OECIDX1` versioned, disposable `.idx` cache. `.000` remains the authoritative standard ZPAQ metadata index.

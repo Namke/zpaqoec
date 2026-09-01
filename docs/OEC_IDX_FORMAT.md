@@ -77,7 +77,7 @@ compress.idx.tmp
 
 then atomically installs the completed cache, keeping a temporary `.oecidx.bak` only during replacement. A failed rebuild does not turn `.idx` into archive authority.
 
-## Current acceleration coverage (0.3.0)
+## Current acceleration coverage (0.3.1)
 
 | Command/path | v1 cache use |
 |---|---|

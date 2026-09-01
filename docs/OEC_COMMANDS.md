@@ -1,4 +1,4 @@
-# zpaqoec OEC command guide — 0.3.0
+# zpaqoec OEC command guide — 0.3.1
 
 OEC means **Optimize + Error Correction**. Original zpaqfranz commands remain available unchanged; use the `oec_*` namespace for the fork's optimized/error-corrected workflow.
 
@@ -32,19 +32,37 @@ zpaqoec oec_version
 Expected identity:
 
 ```text
-zpaqoec OEC overlay 0.3.0 (Optimize + Error Correction)
+zpaqoec OEC overlay 0.3.1 (Optimize + Error Correction)
 ```
 
 ## `oecinit` / `oec_init`
 
-Retrofit an existing multipart archive:
+Retrofit an existing single-file or multipart archive:
 
 ```bash
 zpaqoec oecinit "compress.???"
 zpaqoec oec_init "compress.???"
 ```
 
-It creates/reuses `.000`, generates missing `.ec` files, seeds `.ecstate`, and by default builds/reuses the mmap `.idx` cache.
+For multipart input it creates/reuses `.000`, generates missing `.ec` files, seeds `.ecstate`, and by default builds/reuses the mmap `.idx` cache.
+
+For an exact existing single archive:
+
+```bash
+zpaqoec oec_init E:/LTS/archive.zpaq
+```
+
+the layout is:
+
+```text
+archive.zpaq          original payload
+archive.zpaq.ec       payload EC (created first)
+archive.000.zpaq      metadata-only zero part
+archive.000.zpaq.ec   zero-part EC
+archive.idx           mmap cache
+```
+
+The original `archive.zpaq` is not renamed or rewritten by `oec_init`. If zero-part generation fails, OEC returns a partial failure but preserves `archive.zpaq.ec` as the minimum protection layer. Single-file mode does not use `.ecstate`.
 
 Put cache on SSD:
 
@@ -141,6 +159,14 @@ See [`OEC_IDX_FORMAT.md`](OEC_IDX_FORMAT.md) for cache layout and validity rules
 zpaqoec oec_a compress /data -method 5
 ```
 
+Single-file archive:
+
+```bash
+zpaqoec oec_a archive.zpaq /data -method 5 --idx X:/FastCache/archive.idx
+```
+
+In single mode the same `archive.zpaq` is appended, `archive.000.zpaq` remains the external metadata index, and `archive.zpaq.ec` is regenerated after a successful add.
+
 OEC owns the native `-index` path and conceptually delegates:
 
 ```text
@@ -171,7 +197,7 @@ Disable cache lifecycle:
 zpaqoec oec_a compress /data --no-idx
 ```
 
-**0.3.0 boundary:** native zpaqfranz still reconstructs Jidac/fragment/file state for dedup. `.idx` does not yet replace that RAM state.
+**0.3.1 boundary:** native zpaqfranz still reconstructs Jidac/fragment/file state for dedup. `.idx` does not yet replace that RAM state.
 
 ## `oec_l`
 
@@ -225,7 +251,7 @@ zpaqoec oec_x compress path/to/file -to restore \
   --idx X:/FastCache/compress.idx
 ```
 
-The cache is validated as OEC metadata acceleration state. Actual payload still comes from multipart data through the native extractor because `.000` contains no D blocks. 0.3.0 does not yet claim direct fragment-to-part seeking.
+The cache is validated as OEC metadata acceleration state. Actual payload still comes from multipart data through the native extractor because `.000` contains no D blocks. 0.3.1 does not yet claim direct fragment-to-part seeking.
 
 ## `oec_e`
 

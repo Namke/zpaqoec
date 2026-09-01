@@ -1,10 +1,10 @@
-# zpaqoec 0.3.0
+# zpaqoec 0.3.1
 
 **OEC = Optimize + Error Correction.**
 
 `zpaqoec` is a thin fork/overlay for zpaqfranz 64.8. The design rule is simple:
 
-- keep `.001`, `.002`, ... as normal ZPAQ multipart bytes;
+- keep existing single `.zpaq` payloads and `.001`, `.002`, ... multipart payloads as normal ZPAQ bytes;
 - keep `.000` as the authoritative/portable ZPAQ metadata index;
 - put repair redundancy in independent `.ec` sidecars;
 - put disposable performance state in an optional `.idx` cache that can live on SSD/NVMe.
@@ -33,9 +33,9 @@ Original zpaqfranz commands (`a`, `l`, `i`, `x`, `e`, ...) remain available unch
 
 Run `zpaqoec` with no parameters for quick help. Full OEC usage is in [`docs/OEC_COMMANDS.md`](docs/OEC_COMMANDS.md).
 
-| Command | Role | `.idx` behavior in 0.3.0 |
+| Command | Role | `.idx` behavior in 0.3.1 |
 |---|---|---|
-| `oecinit` / `oec_init` | retrofit existing multipart archive with `.000` + EC | builds/reuses `.idx` unless `--no-idx` |
+| `oecinit` / `oec_init` | retrofit existing single or multipart archive with `.000` + EC | builds/reuses `.idx` unless `--no-idx` |
 | `oec_a` | incremental add through `.000` + EC | maintains cache lifecycle; `--idx-refresh` refreshes immediately |
 | `oec_l` | optimized native `l` equivalent | default form served directly from mmap cache; lazy rebuild from `.000` |
 | `oec_i` | optimized native `i` equivalent | default form served directly from mmap cache; lazy rebuild from `.000` |
@@ -46,11 +46,11 @@ Run `zpaqoec` with no parameters for quick help. Full OEC usage is in [`docs/OEC
 
 ### Current acceleration boundary
 
-0.3.0 implements a real mmap-backed cache for the **default metadata views** used by `oec_l` and `oec_i`. On a valid cache hit, these commands do not invoke the native parser for `.000`.
+0.3.1 implements a real mmap-backed cache for the **default metadata views** used by `oec_l` and `oec_i`. On a valid cache hit, these commands do not invoke the native parser for `.000`.
 
 Option-rich forms such as `oec_l compress -all` still call the native `.000` parser so upstream filtering/version semantics remain exact.
 
-`oec_a` still delegates deduplication to upstream `Jidac`. Therefore 0.3.0 does **not** claim that the full fragment/file state has moved out of RAM. The cache file/lifecycle and mmap layer are ready for the deeper HT/DT backend, but correctness takes priority over replacing upstream dedup structures prematurely.
+`oec_a` still delegates deduplication to upstream `Jidac`. Therefore 0.3.1 does **not** claim that the full fragment/file state has moved out of RAM. The cache file/lifecycle and mmap layer are ready for the deeper HT/DT backend, but correctness takes priority over replacing upstream dedup structures prematurely.
 
 Likewise `oec_x/oec_e` still let upstream decode multipart payload. The cache is validated and available, but fragment-to-part direct seeking is not claimed yet.
 
@@ -79,6 +79,26 @@ compress.idx
 ```
 
 Existing `.001...NNN` parts are never rewritten.
+
+### Legacy single-file archive
+
+An exact existing archive path is treated as a single-part archive, not as a multipart base:
+
+```bash
+zpaqoec oec_init E:/archive/backup.zpaq
+```
+
+OEC keeps the original data file and creates:
+
+```text
+backup.zpaq          original standard ZPAQ payload, unchanged by init
+backup.zpaq.ec       minimum EC protection for the payload
+backup.000.zpaq      metadata-only OEC zero part
+backup.000.zpaq.ec   EC for the zero part
+backup.idx           disposable mmap cache
+```
+
+Single-file init writes `backup.zpaq.ec` **before** attempting zero-part generation. If native index generation fails, the command returns an error but the payload EC remains usable. A single archive does not need `.ecstate`; `oec_a backup.zpaq ...` appends to the same archive, updates `backup.000.zpaq`, and regenerates the payload EC.
 
 Place the disposable cache on a fast SSD/NVMe:
 
@@ -183,7 +203,7 @@ zpaqoec oec_x compress path/to/file -to restore
 zpaqoec oec_e compress path/to/file
 ```
 
-`.000` contains metadata but deliberately omits compressed D blocks, so payload still comes from normal data parts. 0.3.0 does not yet bypass upstream multipart extraction with a fragment locator backend.
+`.000` contains metadata but deliberately omits compressed D blocks, so payload still comes from normal data parts. 0.3.1 does not yet bypass upstream multipart extraction with a fragment locator backend.
 
 ## EC commands
 
@@ -225,7 +245,7 @@ Current identity:
 
 ```text
 zpaqoec oec_version
-zpaqoec OEC overlay 0.3.0 (Optimize + Error Correction)
+zpaqoec OEC overlay 0.3.1 (Optimize + Error Correction)
 ```
 
 ## Tests
