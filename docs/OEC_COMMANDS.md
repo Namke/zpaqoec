@@ -1,125 +1,88 @@
-# zpaqoec OEC command guide
+# zpaqoec OEC command guide — 0.3.0
 
-OEC means **Optimize + Error Correction**. The OEC command namespace is the main target of this fork. Original zpaqfranz commands remain available unchanged as an upstream-compatible baseline.
+OEC means **Optimize + Error Correction**. Original zpaqfranz commands remain available unchanged; use the `oec_*` namespace for the fork's optimized/error-corrected workflow.
 
-## Archive layout
-
-For the conventional 3-digit layout:
+## Layout
 
 ```text
-compress.000          standard ZPAQ metadata-only index (authoritative OEC zero part)
-compress.000.ec       EC sidecar for the zero part
-compress.001          normal ZPAQ data part
+compress.000          authoritative standard ZPAQ metadata-only index
+compress.000.ec       EC for zero part
+compress.001          standard ZPAQ data part
 compress.001.ec       independent EC sidecar
 compress.002
 compress.002.ec
 ...
-compress.ecstate      small OEC next-part checkpoint
+compress.ecstate      next-part checkpoint
+
+# optional and disposable
+X:/FastCache/compress.idx
 ```
 
-The OEC extension does **not** change the ZPAQ bytes in `.001`, `.002`, ... . EC data is stored only in independent `.ec` sidecars.
+`.idx` may be placed on SSD/NVMe. Losing it does not lose the archive.
 
-A future `compress.idx` SSD/NVMe cache is planned but is **not implemented in 0.2.1**. The `.000` file remains authoritative and portable.
-
-## Quick help
-
-Run without parameters:
+## Quick help / identity
 
 ```bash
 zpaqoec
-```
-
-This prints the OEC quick-help page. Original zpaqfranz full help remains available with:
-
-```bash
-zpaqoec h h
-```
-
-You may also print OEC quick help explicitly:
-
-```bash
-zpaqoec oec_help
 zpaqoec oec_h
+zpaqoec oec_help
+zpaqoec oec_version
+```
+
+Expected identity:
+
+```text
+zpaqoec OEC overlay 0.3.0 (Optimize + Error Correction)
 ```
 
 ## `oecinit` / `oec_init`
 
-Both spellings are accepted and are equivalent:
+Retrofit an existing multipart archive:
 
 ```bash
 zpaqoec oecinit "compress.???"
 zpaqoec oec_init "compress.???"
 ```
 
-Purpose:
+It creates/reuses `.000`, generates missing `.ec` files, seeds `.ecstate`, and by default builds/reuses the mmap `.idx` cache.
 
-1. read an existing multipart ZPAQ archive;
-2. generate the metadata-only zero part (`compress.000`);
-3. generate an EC sidecar for each existing data part;
-4. optionally protect the zero part with `compress.000.ec`;
-5. seed `compress.ecstate` for subsequent `oec_a` operations.
-
-Existing data parts are read only and are never rewritten by initialization.
-
-Example for an existing archive:
-
-```text
-compress.001
-compress.002
-compress.003
-```
-
-Run:
+Put cache on SSD:
 
 ```bash
-zpaqoec oecinit "compress.???"
+zpaqoec oecinit "compress.???" --idx X:/FastCache/compress.idx
 ```
 
-Result:
+Disable cache:
 
-```text
-compress.000
-compress.000.ec
-compress.001
-compress.001.ec
-compress.002
-compress.002.ec
-compress.003
-compress.003.ec
-compress.ecstate
+```bash
+zpaqoec oecinit "compress.???" --no-idx
 ```
 
-Generic multipart names are supported:
+Force zero-part/EC/cache regeneration:
+
+```bash
+zpaqoec oecinit "compress.???" --force --idx X:/FastCache/compress.idx
+```
+
+Generic naming:
 
 ```bash
 zpaqoec oecinit "backup_????????.zpaq"
 ```
 
-The inferred zero part is:
-
-```text
-backup_00000000.zpaq
-```
-
-Override the zero-part destination if required:
+Custom zero part:
 
 ```bash
 zpaqoec oecinit "backup_????????.zpaq" -index X:/metadata/backup_00000000.zpaq
 ```
 
-Encrypted archive example:
+Encrypted archive read options pass to the native index builder:
 
 ```bash
 zpaqoec oecinit "secret.???" -key PASSWORD
 ```
 
-Rebuild an existing zero part and regenerate existing EC files:
-
-```bash
-zpaqoec oecinit "compress.???" --force
-```
-
-EC geometry options:
+EC options:
 
 ```text
 --ec-data N
@@ -129,155 +92,198 @@ EC geometry options:
 --no-part-ec
 ```
 
-`--no-trunk-ec` is retained only as a backward-compatible spelling of `--no-index-ec`.
+## `oec_idx`
 
-## `oec_a`
-
-Optimized incremental add using the zero-part index:
+Build cache explicitly:
 
 ```bash
-zpaqoec oec_a compress /data -method 5
-```
-
-For a 3-digit archive this maps conceptually to the native operation:
-
-```text
-a "compress.???" /data -method 5 -index compress.000
-```
-
-After the new part is committed, OEC creates its EC sidecar and refreshes the zero-part EC sidecar.
-
-Normal operation uses `compress.ecstate` to determine the next part number. If that small checkpoint is missing, OEC performs one filename-only recovery and recreates it.
-
-Useful OEC options:
-
-```text
---digits N
---ec-data N
---ec-shard BYTES
---ec-stripes N
---no-index-ec
---no-part-ec
-```
-
-Do not pass native `-index` to `oec_a`; OEC owns the zero-part index path for this command.
-
-## `oec_l`
-
-Optimized equivalent of native `l`:
-
-```bash
-zpaqoec oec_l compress
-zpaqoec oec_l compress -all
-```
-
-For the conventional layout it reads:
-
-```text
-compress.000
-```
-
-It does **not** need to read `.001`, `.002`, ... because list metadata is available in the zero-part index.
-
-Generic layout:
-
-```bash
-zpaqoec oec_l "backup_????????.zpaq"
-```
-
-Custom zero-part path:
-
-```bash
-zpaqoec oec_l compress --oec-index X:/metadata/compress.000
-```
-
-## `oec_i`
-
-Optimized equivalent of native `i`:
-
-```bash
-zpaqoec oec_i compress
-```
-
-Like `oec_l`, this reads the zero part only for metadata/version information.
-
-```bash
-zpaqoec oec_i compress --oec-index X:/metadata/compress.000
-```
-
-## `oec_x`
-
-OEC equivalent of native `x`:
-
-```bash
-zpaqoec oec_x compress path/to/file -to restore
-```
-
-The zero part is the OEC metadata authority, but `.000` intentionally contains no compressed D blocks. Therefore 0.2.1 still passes the multipart data pattern to the native extractor for payload reads.
-
-Generic naming:
-
-```bash
-zpaqoec oec_x "backup_????????.zpaq" path/to/file -to restore
-```
-
-Custom OEC zero part:
-
-```bash
-zpaqoec oec_x compress --oec-index X:/metadata/compress.000 path/to/file -to restore
-```
-
-When the planned `.idx` accelerator is implemented, `oec_x` will use it for file -> fragment -> part/block lookup where possible, while `.000` remains authoritative.
-
-## `oec_e`
-
-OEC equivalent of native `e`:
-
-```bash
-zpaqoec oec_e compress path/to/file
-```
-
-Its current metadata/payload routing follows the same rules as `oec_x`.
-
-## EC commands
-
-Create or replace a sidecar:
-
-```bash
-zpaqoec ec create compress.001
+zpaqoec oec_idx build compress --idx X:/FastCache/compress.idx
 ```
 
 Verify:
 
 ```bash
+zpaqoec oec_idx verify compress --idx X:/FastCache/compress.idx
+```
+
+Info:
+
+```bash
+zpaqoec oec_idx info compress --idx X:/FastCache/compress.idx
+```
+
+Drop:
+
+```bash
+zpaqoec oec_idx drop compress --idx X:/FastCache/compress.idx
+```
+
+For nonstandard layouts:
+
+```bash
+zpaqoec oec_idx build "backup_????????.zpaq" \
+  --idx X:/FastCache/backup.idx
+```
+
+or override authority explicitly:
+
+```bash
+zpaqoec oec_idx build backup \
+  --oec-index X:/metadata/backup.000 \
+  --idx X:/FastCache/backup.idx
+```
+
+See [`OEC_IDX_FORMAT.md`](OEC_IDX_FORMAT.md) for cache layout and validity rules.
+
+## `oec_a`
+
+```bash
+zpaqoec oec_a compress /data -method 5
+```
+
+OEC owns the native `-index` path and conceptually delegates:
+
+```text
+a "compress.???" /data -method 5 -index compress.000
+```
+
+New part EC and zero-part EC are then created/refreshed.
+
+Cache path:
+
+```bash
+zpaqoec oec_a compress /data \
+  --idx X:/FastCache/compress.idx
+```
+
+Default behavior does not immediately rebuild the cache after every add. The changed `.000` fingerprint makes the old cache stale, and the next default `oec_l/oec_i` rebuilds it lazily.
+
+Refresh during add:
+
+```bash
+zpaqoec oec_a compress /data \
+  --idx X:/FastCache/compress.idx --idx-refresh
+```
+
+Disable cache lifecycle:
+
+```bash
+zpaqoec oec_a compress /data --no-idx
+```
+
+**0.3.0 boundary:** native zpaqfranz still reconstructs Jidac/fragment/file state for dedup. `.idx` does not yet replace that RAM state.
+
+## `oec_l`
+
+Default optimized/mmap path:
+
+```bash
+zpaqoec oec_l compress
+zpaqoec oec_l compress --idx X:/FastCache/compress.idx
+```
+
+A valid cache hit does not invoke the native `.000` parser.
+
+Missing/stale/corrupt cache is rebuilt lazily. Disable rebuild:
+
+```bash
+zpaqoec oec_l compress \
+  --idx X:/FastCache/compress.idx --idx-no-rebuild
+```
+
+Bypass cache:
+
+```bash
+zpaqoec oec_l compress --no-idx
+```
+
+Option-rich native list semantics fall back to `.000` parsing:
+
+```bash
+zpaqoec oec_l compress -all --idx X:/FastCache/compress.idx
+```
+
+## `oec_i`
+
+```bash
+zpaqoec oec_i compress
+zpaqoec oec_i compress --idx X:/FastCache/compress.idx
+```
+
+Default form uses the same mmap/lazy-rebuild behavior as `oec_l`.
+
+## `oec_x`
+
+```bash
+zpaqoec oec_x compress path/to/file -to restore
+```
+
+Cache selection is accepted:
+
+```bash
+zpaqoec oec_x compress path/to/file -to restore \
+  --idx X:/FastCache/compress.idx
+```
+
+The cache is validated as OEC metadata acceleration state. Actual payload still comes from multipart data through the native extractor because `.000` contains no D blocks. 0.3.0 does not yet claim direct fragment-to-part seeking.
+
+## `oec_e`
+
+```bash
+zpaqoec oec_e compress path/to/file
+```
+
+Current payload/cache boundary is the same as `oec_x`.
+
+## Common OEC read routing options
+
+```text
+--digits N
+--oec-index PATH
+--idx PATH
+--no-idx
+--idx-no-rebuild
+```
+
+Do not pass native `-index` to `oec_l/i/x/e`; use `--oec-index` for the OEC zero-part authority.
+
+## EC operations
+
+```bash
+zpaqoec ec create compress.001
 zpaqoec ec verify compress.001
-```
-
-Repair to a separate file:
-
-```bash
 zpaqoec ec repair compress.001 --output compress.001.repaired
-```
-
-Inspect EC metadata:
-
-```bash
 zpaqoec ec info compress.001.ec
 ```
 
-Default EC geometry in 0.2.1:
+## Windows examples
 
-```text
-shard size          64 KiB
-data shards         32
-parity shards        2 (P + Q over GF(256))
-stripes/window      64
-nominal parity       6.25%
+```powershell
+.\build\zpaqoec.exe oec_init `
+  'W:\LTS\ZPacks\Programs\Games\202601\202601????.zpaq' `
+  --idx 'X:\ZpaqCache\202601.idx'
+
+.\build\zpaqoec.exe oec_l `
+  'W:\LTS\ZPacks\Programs\Games\202601\202601????.zpaq' `
+  --idx 'X:\ZpaqCache\202601.idx'
 ```
 
-## Original zpaqfranz commands
+Build:
 
-The fork does not replace the original command namespace. These still execute upstream behavior:
+```powershell
+.\scripts\build-windows.ps1 `
+  -Compiler 'C:\Programs\msys64\ucrt64\bin\g++.exe'
+```
+
+## Linux examples
+
+```bash
+./scripts/build-linux.sh /src/zpaqfranz.cpp
+./build/zpaqoec oecinit '/archive/compress.???' --idx /nvme/oec/compress.idx
+./build/zpaqoec oec_l /archive/compress --idx /nvme/oec/compress.idx
+```
+
+## Native baseline remains available
 
 ```bash
 zpaqoec a ...
@@ -287,81 +293,4 @@ zpaqoec x ...
 zpaqoec e ...
 ```
 
-Use the `oec_*` versions when you want OEC routing/optimization/error-correction behavior.
-
-## Windows examples
-
-PowerShell:
-
-```powershell
-.\build\zpaqoec.exe oec_init 'W:\LTS\ZPacks\Programs\Games\202601\202601????.zpaq'
-.\build\zpaqoec.exe oec_l 'W:\LTS\ZPacks\Programs\Games\202601\202601????.zpaq'
-```
-
-Build with MSYS2 UCRT64:
-
-```powershell
-.\scripts\build-windows.ps1 -Compiler 'C:\Programs\msys64\ucrt64\bin\g++.exe'
-```
-
-The build script relocates older 0.2.0/0.1.x hooks automatically; a clean upstream checkout is not required.
-
-## Linux examples
-
-```bash
-./scripts/build-linux.sh
-./build/zpaqoec oecinit '/archive/compress.???'
-./build/zpaqoec oec_l /archive/compress
-```
-
-## Planned `.idx` behavior
-
-The `.idx` accelerator is planned as a disposable disk-backed cache that may live on a fast SSD/NVMe device:
-
-```text
-/archive/compress.000             authoritative portable ZPAQ index
-/fast-cache/compress.idx          rebuildable acceleration cache
-```
-
-After it is implemented, all OEC commands will use it where beneficial:
-
-```text
-oec_a  -> fragment/dedup lookup acceleration
-oec_l  -> catalog lookup acceleration
-oec_i  -> version/info lookup acceleration
-oec_x  -> file/fragment/part lookup acceleration
-oec_e  -> file/fragment/part lookup acceleration
-```
-
-Deleting or losing `.idx` must never make the archive unrecoverable; it will be rebuildable from `.000`.
-
-
-## Build identity / diagnostics
-
-```text
-zpaqoec oec_version
-```
-
-Expected for this release:
-
-```text
-zpaqoec OEC overlay 0.2.4 (Optimize + Error Correction)
-```
-
-Run with no parameters for the OEC quick command reference:
-
-```text
-zpaqoec
-```
-
-Both initialization spellings are accepted:
-
-```text
-zpaqoec oecinit  "archive.???"
-zpaqoec oec_init "archive.???"
-```
-
-On Windows, when testing a newly built version, prefer the exact build path or
-use `build-windows.ps1 -InstallTo ...`. A different `zpaqoec.exe` earlier in
-PATH/current directory can otherwise make an old binary look like a dispatcher
-failure.
+These retain upstream behavior and are useful as a compatibility/regression baseline.

@@ -133,6 +133,7 @@ def main():
 
     here = pathlib.Path(__file__).resolve().parent.parent / 'src'
     shutil.copy2(here / 'zfec.hpp', extdir / 'zfec.hpp')
+    shutil.copy2(here / 'oec_idx.hpp', extdir / 'oec_idx.hpp')
     shutil.copy2(here / 'zpaqfranz_ext.hpp', extdir / 'zpaqfranz_ext.hpp')
 
     text = src.read_text(errors='surrogateescape')

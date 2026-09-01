@@ -18,12 +18,17 @@ with open(p,'wb') as f:
 PY
 done
 ./zpaqfranz oecinit 'compress.???' --ec-data 16 --ec-stripes 8 >/dev/null
-[ -f compress.000 ] && [ -f compress.000.ec ]
+[ -f compress.000 ] && [ -f compress.000.ec ] && [ -f compress.idx ]
+./zpaqfranz oec_idx verify compress >/dev/null
 for n in 1 2 3; do p=$(printf 'compress.%03d' "$n"); [ -f "$p.ec" ]; ./zpaqfranz ec verify "$p" >/dev/null; done
 ./zpaqfranz ec verify compress.000 >/dev/null
 grep -q 'last_part=3' compress.ecstate
-# Refuse accidental overwrite.
-if ./zpaqfranz oecinit 'compress.???' >/dev/null 2>&1; then echo 'expected refusal without --force'; exit 1; fi
+# Existing .000 + valid .idx are authoritative/cache and are reused. A second
+# oecinit must not re-run native x/l/i just to rediscover metadata.
+: > native_calls.log
+./zpaqfranz oecinit 'compress.???' >/dev/null
+./zpaqfranz oec_idx verify compress >/dev/null
+[ ! -s native_calls.log ] || { echo 'repeat oecinit unexpectedly invoked native parser'; cat native_calls.log; exit 1; }
 # Force rebuild is transactional and recreates all EC.
 ./zpaqfranz oecinit 'compress.???' --force --ec-data 16 --ec-stripes 8 >/dev/null
 ./zpaqfranz ec verify compress.000 >/dev/null
@@ -31,6 +36,7 @@ if ./zpaqfranz oecinit 'compress.???' >/dev/null 2>&1; then echo 'expected refus
 rm -f legacy_*.zpaq legacy_*.zpaq.ec
 for n in 1 2; do cp compress.001 "$(printf 'legacy_%04d.zpaq' "$n")"; done
 ./zpaqfranz oecinit 'legacy_????.zpaq' --ec-data 16 --ec-stripes 8 >/dev/null
-[ -f legacy_0000.zpaq ] && [ -f legacy_0000.zpaq.ec ]
+[ -f legacy_0000.zpaq ] && [ -f legacy_0000.zpaq.ec ] && [ -f legacy_0000.zpaq.idx ]
+./zpaqfranz oec_idx verify 'legacy_????.zpaq' >/dev/null
 [ -f legacy_0001.zpaq.ec ] && [ -f legacy_0002.zpaq.ec ]
 echo 'OECINIT TESTS PASS'

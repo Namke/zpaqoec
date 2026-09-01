@@ -16,14 +16,20 @@ grep -Fq 'oecinit | oec_init' noargs.txt
 ./zpaqfranz oec_a compress dummy-source --ec-data 16 --ec-stripes 8 >/dev/null
 ./zpaqfranz oec_a compress dummy-source --ec-data 16 --ec-stripes 8 >/dev/null
 : > native_calls.log
-# Metadata commands MUST route only to the zero part.
-./zpaqfranz oec_l compress -all >/dev/null
+# Build the mmap cache explicitly, then default metadata commands MUST be served
+# from .idx without invoking native l/i at all.
+./zpaqfranz oec_idx build compress >/dev/null
+: > native_calls.log
+./zpaqfranz oec_l compress >/dev/null
 ./zpaqfranz oec_i compress >/dev/null
+[ ! -s native_calls.log ] || { echo 'default metadata OEC command did not use idx'; cat native_calls.log; exit 1; }
+# Option-rich metadata keeps exact upstream semantics and uses only .000.
+./zpaqfranz oec_l compress -all >/dev/null
 grep -Fxq 'l|compress.000|-all' native_calls.log
-grep -Fxq 'i|compress.000' native_calls.log
 if grep -E '^(l|i)\|compress\.\?\?\?' native_calls.log >/dev/null; then
   echo 'metadata OEC command touched multipart pattern'; exit 1
 fi
+./zpaqfranz oec_idx verify compress >/dev/null
 # Extraction commands retain native payload semantics and address the parts.
 ./zpaqfranz oec_x compress file.txt -to out >/dev/null
 ./zpaqfranz oec_e compress file.txt >/dev/null
@@ -36,7 +42,8 @@ for n in 1 2; do cp compress.001 "$(printf 'legacy_%04d.zpaq' "$n")"; done
 : > native_calls.log
 ./zpaqfranz oec_l 'legacy_????.zpaq' >/dev/null
 ./zpaqfranz oec_x 'legacy_????.zpaq' foo >/dev/null
-grep -Fxq 'l|legacy_0000.zpaq' native_calls.log
+# oec_init built legacy_0000.zpaq.idx, so l is mmap-served; extraction still uses payload pattern.
+if grep -E '^l\|' native_calls.log >/dev/null; then echo 'legacy oec_l unexpectedly bypassed idx'; exit 1; fi
 grep -Fxq 'x|legacy_????.zpaq|foo' native_calls.log
 # Custom zero-part location applies to metadata and acts as OEC authority for extraction.
 cp compress.000 custom.zero

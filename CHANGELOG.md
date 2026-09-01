@@ -1,11 +1,22 @@
 # Changelog
 
-## 0.2.4
+## 0.3.0 - mmap `.idx` acceleration cache
 
-- Fix Windows runtime smoke harness: the function parameter was named `$Args`, colliding with PowerShell's automatic `$args` variable. As a result every smoke invocation could execute the binary with no arguments; `oec_h` falsely passed because no-arg also prints help, while `oec_version` exposed the bug.
-- Rename the smoke parameter to `$CommandArgs` and use named parameter binding for every probe.
-- Add an argument-sensitive `oecinit` smoke probe that expects exit code 2 plus OEC-specific usage text, proving argv reaches the OEC dispatcher.
-- No archive format, EC format, or OEC command semantics changed.
+- Add `OECIDX1` versioned, disposable `.idx` cache. `.000` remains the authoritative standard ZPAQ metadata index.
+- Add explicit cache placement with `--idx PATH`, intended for SSD/NVMe independent of archive storage.
+- Add cross-platform memory mapping: `CreateFileMappingW`/`MapViewOfFile` on Windows and `mmap` on Unix/Linux.
+- Add transactional `.idx.tmp` replacement plus header/section CRC32C validation.
+- Add zero-part staleness fingerprint: size, mtime, and first/middle/last 64 KiB CRC32C samples.
+- Add `oec_idx build|verify|info|drop`.
+- `oecinit` now builds/reuses `.idx` by default, supports `--no-idx`, and reuses an existing valid cache without reparsing `.000`.
+- Default `oec_l` and `oec_i` are served directly from mmap cache on a valid hit; missing/stale/corrupt cache is rebuilt lazily unless `--idx-no-rebuild` is used.
+- Option-rich `oec_l/i` variants continue to use native `.000` parsing for exact upstream option semantics.
+- `oec_a` supports `--idx`, `--no-idx`, and `--idx-refresh`; default behavior lets the changed `.000` fingerprint invalidate cache and refresh lazily on the next metadata read.
+- `oec_x/e` accept/validate the cache but still delegate payload extraction to the native multipart path; no direct fragment locator is claimed in v1.
+- Explicitly document the current deep-integration boundary: upstream `Jidac::add` still reconstructs HT/DT state and builds its native dedup index. 0.3.0 does not claim full add-RAM offload.
+- Add `docs/OEC_IDX_FORMAT.md` and update OEC command/README documentation.
+- Add stale-cache, corrupt-cache, lazy-rebuild, mmap-hit/no-native-call, custom SSD path, and cache-drop regression tests.
+- Retain the Windows smoke-harness `$CommandArgs` fix and argument-sensitive runtime dispatch gate from 0.2.4 development.
 
 ## 0.2.3
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "zfec.hpp"
+#include "oec_idx.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -20,7 +21,7 @@
 namespace zfext {
 
 static const int kNotHandled = -777777;
-static const char* const kOecOverlayVersion = "0.2.4";
+static const char* const kOecOverlayVersion = "0.3.0";
 
 inline std::string zero_suffix(uint64_t n, uint32_t digits) {
   std::ostringstream s; s << std::setw(static_cast<int>(digits)) << std::setfill('0') << n; return s.str();
@@ -110,11 +111,111 @@ inline int spawn_self(const std::string& exe, const std::vector<std::string>& ar
 #endif
 }
 
+
+inline std::wstring oec_utf8_to_wide(const std::string& s) {
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+  if (s.empty()) return std::wstring();
+  int n=MultiByteToWideChar(CP_UTF8,0,s.c_str(),-1,0,0);
+  if(n<=0) return std::wstring();
+  std::vector<wchar_t> w(static_cast<size_t>(n));
+  MultiByteToWideChar(CP_UTF8,0,s.c_str(),-1,w.data(),n);
+  return std::wstring(w.data());
+#else
+  (void)s; return std::wstring();
+#endif
+}
+
+inline std::wstring oec_quote_win_arg(const std::wstring& a) {
+  if (a.empty()) return L"\"\"";
+  bool need=false;
+  for(size_t i=0;i<a.size();++i) if(a[i]==L' '||a[i]==L'\t'||a[i]==L'\"') {need=true;break;}
+  if(!need) return a;
+  std::wstring r=L"\""; size_t bs=0;
+  for(size_t i=0;i<a.size();++i){
+    wchar_t c=a[i];
+    if(c==L'\\'){ ++bs; continue; }
+    if(c==L'\"'){ r.append(bs*2+1,L'\\'); r+=L'\"'; bs=0; continue; }
+    r.append(bs,L'\\'); bs=0; r+=c;
+  }
+  r.append(bs*2,L'\\'); r+=L'\"'; return r;
+}
+
+// Spawn this executable and capture stdout+stderr. Used only to materialize the
+// disposable .idx cache from the authoritative .000 index.
+inline int spawn_self_capture(const std::string& exe, const std::vector<std::string>& args,
+                              std::string& output, std::string& err) {
+  output.clear(); err.clear();
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+  SECURITY_ATTRIBUTES sa; std::memset(&sa,0,sizeof(sa)); sa.nLength=sizeof(sa); sa.bInheritHandle=TRUE;
+  HANDLE rd=0, wr=0;
+  if(!CreatePipe(&rd,&wr,&sa,0)){ err="CreatePipe failed"; return 127; }
+  SetHandleInformation(rd,HANDLE_FLAG_INHERIT,0);
+  std::wstring cmd=oec_quote_win_arg(oec_utf8_to_wide(exe));
+  for(size_t i=0;i<args.size();++i){ cmd+=L" "; cmd+=oec_quote_win_arg(oec_utf8_to_wide(args[i])); }
+  std::vector<wchar_t> mutable_cmd(cmd.begin(),cmd.end()); mutable_cmd.push_back(0);
+  STARTUPINFOW si; PROCESS_INFORMATION pi; std::memset(&si,0,sizeof(si)); std::memset(&pi,0,sizeof(pi));
+  si.cb=sizeof(si); si.dwFlags=STARTF_USESTDHANDLES; si.hStdOutput=wr; si.hStdError=wr; si.hStdInput=GetStdHandle(STD_INPUT_HANDLE);
+  std::wstring wexe=oec_utf8_to_wide(exe);
+  BOOL ok=CreateProcessW(wexe.empty()?0:wexe.c_str(), mutable_cmd.data(), 0,0,TRUE,CREATE_NO_WINDOW,0,0,&si,&pi);
+  CloseHandle(wr);
+  if(!ok){ CloseHandle(rd); err="CreateProcessW failed"; return 127; }
+  char buf[16384]; DWORD got=0;
+  while(ReadFile(rd,buf,sizeof(buf),&got,0) && got) output.append(buf,buf+got);
+  CloseHandle(rd); WaitForSingleObject(pi.hProcess,INFINITE); DWORD code=127; GetExitCodeProcess(pi.hProcess,&code);
+  CloseHandle(pi.hThread); CloseHandle(pi.hProcess); return static_cast<int>(code);
+#else
+  int pfd[2]; if(pipe(pfd)!=0){ err="pipe failed"; return 127; }
+  pid_t pid=fork();
+  if(pid<0){ close(pfd[0]); close(pfd[1]); err="fork failed"; return 127; }
+  if(pid==0){
+    dup2(pfd[1],STDOUT_FILENO); dup2(pfd[1],STDERR_FILENO); close(pfd[0]); close(pfd[1]);
+    std::vector<char*> av; av.push_back(const_cast<char*>(exe.c_str()));
+    for(size_t i=0;i<args.size();++i) av.push_back(const_cast<char*>(args[i].c_str())); av.push_back(0);
+    execvp(exe.c_str(),av.data()); _exit(127);
+  }
+  close(pfd[1]); char buf[16384]; ssize_t n;
+  while((n=read(pfd[0],buf,sizeof(buf)))>0) output.append(buf,static_cast<size_t>(n));
+  close(pfd[0]); int status=0; if(waitpid(pid,&status,0)<0){ err="waitpid failed"; return 127; }
+  if(WIFEXITED(status)) return WEXITSTATUS(status); if(WIFSIGNALED(status)) return 128+WTERMSIG(status); return 127;
+#endif
+}
+
+
+inline bool build_idx_cache(const std::string& exe, const std::string& index,
+                            const std::string& idx_path, std::string& err) {
+  if(!path_exists(index)){ err="zero-part index not found: "+index; return false; }
+  std::string list_text, info_text, caperr;
+  std::vector<std::string> a; a.push_back("l"); a.push_back(index);
+  int rc=spawn_self_capture(exe,a,list_text,caperr);
+  if(rc!=0){ std::ostringstream e; e<<"native l failed rc="<<rc; if(!caperr.empty())e<<" ("<<caperr<<")"; err=e.str(); return false; }
+  a.clear(); a.push_back("i"); a.push_back(index);
+  rc=spawn_self_capture(exe,a,info_text,caperr);
+  if(rc!=0){ std::ostringstream e; e<<"native i failed rc="<<rc; if(!caperr.empty())e<<" ("<<caperr<<")"; err=e.str(); return false; }
+  if(!oecidx::write_cache(idx_path,index,list_text,info_text,err)) return false;
+  return true;
+}
+
+inline bool ensure_idx_cache(const std::string& exe, const std::string& index,
+                             const std::string& idx_path, bool rebuild,
+                             oecidx::Cache& cache, std::string& err) {
+  if(cache.open(idx_path,index,err)) return true;
+  if(!rebuild) return false;
+  std::string why=err;
+  if(!build_idx_cache(exe,index,idx_path,err)) {
+    if(!why.empty()) err="idx unavailable ("+why+"); rebuild failed: "+err;
+    return false;
+  }
+  err.clear();
+  if(!cache.open(idx_path,index,err)) return false;
+  return true;
+}
+
 inline void oec_a_usage() {
   std::fprintf(stderr,
     "OEC (Optimize + Error Correction) add:\n"
     "  oec_a BASE <zpaq add source/options...> [--ec-data N] [--ec-shard BYTES]\n"
-    "           [--ec-stripes N] [--digits N] [--no-index-ec] [--no-part-ec]\n\n"
+    "           [--ec-stripes N] [--digits N] [--no-index-ec] [--no-part-ec]\n"
+    "           [--idx PATH] [--idx-refresh] [--no-idx]\n\n"
     "Example:\n"
     "  zpaqoec oec_a compress /data -method 5\n\n"
     "Creates/updates compress.000 and one new compress.NNN, then writes\n"
@@ -128,6 +229,8 @@ inline int oec_a(int argc, const char* const* argv) {
   uint32_t digits=3;
   zfec::Options ecopt;
   bool protect_trunk=true, protect_part=true;
+  bool use_idx=true, refresh_idx=false;
+  std::string idx_path = base + ".idx";
   std::vector<std::string> pass;
   for (int i=3;i<argc;++i) {
     std::string a=argv[i];
@@ -141,6 +244,9 @@ inline int oec_a(int argc, const char* const* argv) {
       if (!zfec::parse_u32(argv[++i], ecopt.stripes_per_window)) { std::fprintf(stderr,"bad --ec-stripes\n"); return 2; }
     } else if ((a=="--no-index-ec" || a=="--no-trunk-ec")) protect_trunk=false;
     else if (a=="--no-part-ec") protect_part=false;
+    else if (a=="--idx" && i+1<argc) { idx_path=argv[++i]; use_idx=true; }
+    else if (a=="--idx-refresh") { refresh_idx=true; use_idx=true; }
+    else if (a=="--no-idx") use_idx=false;
     else if (a=="-index" || a=="--index") {
       std::fprintf(stderr,"oec_a owns -index; do not pass another index path\n"); return 2;
     } else pass.push_back(a);
@@ -195,6 +301,19 @@ inline int oec_a(int argc, const char* const* argv) {
     }
     std::fprintf(stdout,"oec_a: protected zero part %s -> %s.ec\n",index.c_str(),index.c_str());
   }
+  if (use_idx) {
+    if (refresh_idx) {
+      if (!build_idx_cache(exe,index,idx_path,err)) {
+        std::fprintf(stderr,"oec_a: archive update OK, idx refresh failed: %s\n",err.c_str()); return 7;
+      }
+      std::fprintf(stdout,"oec_a: refreshed idx %s\n",idx_path.c_str());
+    } else {
+      if (path_exists(idx_path))
+        std::fprintf(stdout,"oec_a: idx %s is now stale by source fingerprint; next OEC metadata read will rebuild it lazily (use --idx-refresh to refresh now)\n",idx_path.c_str());
+      else
+        std::fprintf(stdout,"oec_a: idx %s is not present; next OEC metadata read will build it lazily (use --idx-refresh to build now)\n",idx_path.c_str());
+    }
+  }
   return 0;
 }
 
@@ -204,7 +323,8 @@ inline void oecinit_usage() {
     "Initialize/retrofit OEC archive (Optimize + Error Correction):\n"
     "  oecinit ARCHIVE_PATTERN [-index INDEX] [--force]\n"
     "            [--ec-data N] [--ec-shard BYTES] [--ec-stripes N]\n"
-    "            [--no-index-ec] [--no-part-ec] [zpaq read options...]\n\n"
+    "            [--no-index-ec] [--no-part-ec] [--idx PATH] [--no-idx]\n"
+    "            [zpaq read options...]\n\n"
     "Examples:\n"
     "  zpaqoec oecinit \"compress.???\"\n"
     "  zpaqoec oecinit \"backup_????????.zpaq\" -index backup_00000000.zpaq\n"
@@ -241,7 +361,11 @@ inline int oecinit(int argc, const char* const* argv) {
   if (!parse_qmark_pattern(pattern, pp, perr)) { std::fprintf(stderr, "oecinit: %s\n", perr.c_str()); return 2; }
 
   std::string index = infer_index_from_pattern(pp);
-  bool force = false, protect_trunk = true, protect_parts = true;
+  std::string idx_path;
+  if (pp.suffix.empty() && !pp.prefix.empty() && pp.prefix[pp.prefix.size()-1]=='.')
+    idx_path = pp.prefix.substr(0,pp.prefix.size()-1) + ".idx";
+  else idx_path = index + ".idx";
+  bool force = false, protect_trunk = true, protect_parts = true, use_idx = true;
   zfec::Options ecopt;
   std::vector<std::string> readopts;
   for (int i=3;i<argc;++i) {
@@ -256,6 +380,8 @@ inline int oecinit(int argc, const char* const* argv) {
       if (!zfec::parse_u32(argv[++i], ecopt.stripes_per_window)) { std::fprintf(stderr,"bad --ec-stripes\n"); return 2; }
     } else if ((a=="--no-index-ec" || a=="--no-trunk-ec")) protect_trunk = false;
     else if (a=="--no-part-ec") protect_parts = false;
+    else if (a=="--idx" && i+1<argc) { idx_path=argv[++i]; use_idx=true; }
+    else if (a=="--no-idx") use_idx=false;
     else readopts.push_back(a);
   }
 
@@ -263,31 +389,31 @@ inline int oecinit(int argc, const char* const* argv) {
   if (!zfec::validate_options(ecopt, verr)) { std::fprintf(stderr,"bad EC options: %s\n",verr.c_str()); return 2; }
   const std::string first = pattern_number(pp, 1);
   if (!path_exists(first)) { std::fprintf(stderr,"oecinit: first archive part not found: %s\n",first.c_str()); return 3; }
-  if (path_exists(index) && !force) {
-    std::fprintf(stderr,"oecinit: index already exists: %s (use --force to rebuild)\n",index.c_str());
-    return 3;
-  }
-
-  // Build to a temporary path. Native `x -index` reads archive metadata but does not extract files.
-  const std::string tmpindex = index + ".oecinit.tmp";
-  std::remove(tmpindex.c_str());
-  std::vector<std::string> child;
-  child.push_back("x"); child.push_back(pattern);
-  child.insert(child.end(), readopts.begin(), readopts.end());
-  child.push_back("-index"); child.push_back(tmpindex);
-  child.push_back("-force");
-  std::fprintf(stdout,"oecinit: rebuilding index %s from %s\n",index.c_str(),pattern.c_str());
-  const int rc = spawn_self(exe, child);
-  if (rc != 0) {
+  const bool have_index = path_exists(index);
+  if (have_index && !force) {
+    std::fprintf(stdout,"oecinit: reusing existing zero-part index %s (use --force to rebuild)\n",index.c_str());
+  } else {
+    // Build to a temporary path. Native `x -index` reads archive metadata but does not extract files.
+    const std::string tmpindex = index + ".oecinit.tmp";
     std::remove(tmpindex.c_str());
-    std::fprintf(stderr,"oecinit: native index rebuild failed rc=%d; archive parts were not modified\n",rc);
-    return rc;
+    std::vector<std::string> child;
+    child.push_back("x"); child.push_back(pattern);
+    child.insert(child.end(), readopts.begin(), readopts.end());
+    child.push_back("-index"); child.push_back(tmpindex);
+    child.push_back("-force");
+    std::fprintf(stdout,"oecinit: rebuilding index %s from %s\n",index.c_str(),pattern.c_str());
+    const int rc = spawn_self(exe, child);
+    if (rc != 0) {
+      std::remove(tmpindex.c_str());
+      std::fprintf(stderr,"oecinit: native index rebuild failed rc=%d; archive parts were not modified\n",rc);
+      return rc;
+    }
+    if (!path_exists(tmpindex)) {
+      std::fprintf(stderr,"oecinit: native index rebuild returned success but did not create %s\n",tmpindex.c_str());
+      return 4;
+    }
+    if (!replace_file_safely(tmpindex, index, verr)) { std::fprintf(stderr,"oecinit: %s\n",verr.c_str()); return 4; }
   }
-  if (!path_exists(tmpindex)) {
-    std::fprintf(stderr,"oecinit: native index rebuild returned success but did not create %s\n",tmpindex.c_str());
-    return 4;
-  }
-  if (!replace_file_safely(tmpindex, index, verr)) { std::fprintf(stderr,"oecinit: %s\n",verr.c_str()); return 4; }
 
   uint64_t maxn = 1;
   for (uint32_t i=0;i<pp.digits;++i) maxn *= 10;
@@ -341,8 +467,24 @@ inline int oecinit(int argc, const char* const* argv) {
     if (!base.empty() && !write_state(base,last))
       std::fprintf(stderr,"oecinit: warning: could not write %s\n",state_path(base).c_str());
   }
-  std::fprintf(stdout,"oecinit: DONE parts=%llu ec_created=%llu ec_skipped=%llu index=%s\n",
-    (unsigned long long)last,(unsigned long long)created,(unsigned long long)skipped,index.c_str());
+  if (use_idx) {
+    oecidx::Cache cache;
+    std::string idxerr;
+    if (!force && cache.open(idx_path,index,idxerr)) {
+      std::fprintf(stdout,"oecinit: reusing valid mmap cache %s\n",idx_path.c_str());
+    } else {
+      if (!idxerr.empty() && path_exists(idx_path))
+        std::fprintf(stdout,"oecinit: rebuilding stale/invalid idx %s (%s)\n",idx_path.c_str(),idxerr.c_str());
+      if (!build_idx_cache(exe,index,idx_path,err)) {
+        std::fprintf(stderr,"oecinit: archive/index/EC ready, but idx build failed: %s\n",err.c_str());
+        return 7;
+      }
+      std::fprintf(stdout,"oecinit: built mmap cache %s\n",idx_path.c_str());
+    }
+  }
+  std::fprintf(stdout,"oecinit: DONE parts=%llu ec_created=%llu ec_skipped=%llu index=%s idx=%s\n",
+    (unsigned long long)last,(unsigned long long)created,(unsigned long long)skipped,index.c_str(),
+    use_idx?idx_path.c_str():"disabled");
   return 0;
 }
 
@@ -351,7 +493,8 @@ inline int oecinit(int argc, const char* const* argv) {
 // OEC read-command routing. The portable .000 index is authoritative metadata
 // and contains no D blocks. Therefore metadata-only commands can run directly
 // against .000, while extraction commands must still address the multipart
-// data pattern until the optional disk-backed .idx accelerator is integrated.
+// data pattern. The mmap .idx accelerator serves default metadata reads now;
+// deeper fragment->part and dedup backends remain guarded/fallback integrations.
 struct OecReadLayout {
   std::string pattern;
   std::string index;
@@ -376,11 +519,59 @@ inline bool resolve_oec_read_layout(const std::string& spec, uint32_t digits,
   return true;
 }
 
+
+inline std::string default_idx_for_layout(const std::string& spec, const OecReadLayout& layout) {
+  if (spec.find('?') == std::string::npos) return spec + ".idx";
+  PatternParts pp; std::string err;
+  if (parse_qmark_pattern(spec,pp,err) && pp.suffix.empty() && !pp.prefix.empty() && pp.prefix[pp.prefix.size()-1]=='.')
+    return pp.prefix.substr(0,pp.prefix.size()-1) + ".idx";
+  return layout.index + ".idx";
+}
+
+inline int oec_idx_command(int argc, const char* const* argv) {
+  if (argc < 4) {
+    std::fprintf(stderr,
+      "OEC mmap cache manager:\n"
+      "  oec_idx build|verify|info|drop ARCHIVE [--idx PATH] [--digits N] [--oec-index PATH]\n"
+      "Examples:\n"
+      "  zpaqoec oec_idx build compress --idx X:/FastCache/compress.idx\n"
+      "  zpaqoec oec_idx verify compress --idx X:/FastCache/compress.idx\n");
+    return 2;
+  }
+  const std::string exe=argv[0], action=argv[2], spec=argv[3];
+  uint32_t digits=3; std::string index_override, idx_override;
+  for(int i=4;i<argc;++i){
+    const std::string a=argv[i];
+    if(a=="--digits" && i+1<argc){ if(!zfec::parse_u32(argv[++i],digits)||digits<1||digits>9){std::fprintf(stderr,"oec_idx: bad --digits\n");return 2;} }
+    else if(a=="--oec-index" && i+1<argc) index_override=argv[++i];
+    else if(a=="--idx" && i+1<argc) idx_override=argv[++i];
+    else { std::fprintf(stderr,"oec_idx: unknown option %s\n",a.c_str()); return 2; }
+  }
+  OecReadLayout layout; std::string err;
+  if(!resolve_oec_read_layout(spec,digits,index_override,layout,err)){std::fprintf(stderr,"oec_idx: %s\n",err.c_str());return 2;}
+  const std::string idx=idx_override.empty()?default_idx_for_layout(spec,layout):idx_override;
+  if(action=="build"){
+    if(!build_idx_cache(exe,layout.index,idx,err)){std::fprintf(stderr,"oec_idx: build failed: %s\n",err.c_str());return 4;}
+    oecidx::Cache c; if(!c.open(idx,layout.index,err)){std::fprintf(stderr,"oec_idx: post-build verify failed: %s\n",err.c_str());return 4;}
+    std::fprintf(stdout,"oec_idx: built %s\n%s\n",idx.c_str(),oecidx::describe(*c.header()).c_str()); return 0;
+  }
+  if(action=="drop"){
+    if(!oecidx::remove_cache(idx,err)){std::fprintf(stderr,"oec_idx: %s\n",err.c_str());return 4;}
+    std::fprintf(stdout,"oec_idx: dropped %s\n",idx.c_str());return 0;
+  }
+  oecidx::Cache c;
+  if(!c.open(idx,layout.index,err)){std::fprintf(stderr,"oec_idx: %s: %s\n",action.c_str(),err.c_str());return 3;}
+  if(action=="verify") { std::fprintf(stdout,"oec_idx: OK %s\n%s\n",idx.c_str(),oecidx::describe(*c.header()).c_str()); return 0; }
+  if(action=="info") { std::fprintf(stdout,"idx=%s\nsource=%s\n%s\n",idx.c_str(),layout.index.c_str(),oecidx::describe(*c.header()).c_str()); return 0; }
+  std::fprintf(stderr,"oec_idx: unknown action %s\n",action.c_str()); return 2;
+}
+
 inline void oec_read_usage(const char* cmd) {
   const bool metadata = std::strcmp(cmd, "oec_l") == 0 || std::strcmp(cmd, "oec_i") == 0;
   std::fprintf(stderr,
     "OEC optimized %s:\n"
-    "  %s ARCHIVE [native options/files...] [--digits N] [--oec-index PATH]\n\n"
+    "  %s ARCHIVE [native options/files...] [--digits N] [--oec-index PATH]\n"
+    "       [--idx PATH] [--no-idx] [--idx-no-rebuild]\n\n"
     "Examples:\n"
     "  zpaqoec %s compress -all\n"
     "  zpaqoec %s \"backup_????????.zpaq\"\n\n"
@@ -398,7 +589,8 @@ inline int oec_read_command(int argc, const char* const* argv,
   const std::string exe = argv[0];
   const std::string spec = argv[2];
   uint32_t digits = 3;
-  std::string index_override;
+  std::string index_override, idx_override;
+  bool use_idx=true, rebuild_idx=true;
   std::vector<std::string> pass;
   for (int i = 3; i < argc; ++i) {
     const std::string a = argv[i];
@@ -408,6 +600,12 @@ inline int oec_read_command(int argc, const char* const* argv,
       }
     } else if (a == "--oec-index" && i + 1 < argc) {
       index_override = argv[++i];
+    } else if (a == "--idx" && i + 1 < argc) {
+      idx_override = argv[++i]; use_idx=true;
+    } else if (a == "--no-idx") {
+      use_idx=false;
+    } else if (a == "--idx-no-rebuild") {
+      rebuild_idx=false;
     } else if (a == "-index" || a == "--index") {
       std::fprintf(stderr,
         "%s: -index is reserved by native ZPAQ semantics; use --oec-index PATH to select the OEC zero part\n",
@@ -423,6 +621,7 @@ inline int oec_read_command(int argc, const char* const* argv,
   if (!resolve_oec_read_layout(spec, digits, index_override, layout, err)) {
     std::fprintf(stderr, "%s: %s\n", oec_cmd, err.c_str()); return 2;
   }
+  const std::string idx_path=idx_override.empty()?default_idx_for_layout(spec,layout):idx_override;
 
   const std::string target = metadata_only ? layout.index : layout.pattern;
   if (metadata_only) {
@@ -430,6 +629,30 @@ inline int oec_read_command(int argc, const char* const* argv,
       std::fprintf(stderr, "%s: OEC zero-part index not found: %s (run oecinit first)\n",
                    oec_cmd, layout.index.c_str());
       return 3;
+    }
+
+    // The default l/i forms are fully cacheable. Native filtering/search/options
+    // retain exact upstream semantics and therefore fall back to .000 parsing.
+    if(use_idx && pass.empty()) {
+      oecidx::Cache cache;
+      if(ensure_idx_cache(exe,layout.index,idx_path,rebuild_idx,cache,err)) {
+        const bool want_list = std::strcmp(native_cmd,"l")==0;
+        const char* p = want_list ? cache.list_data() : cache.info_data();
+        const size_t n = want_list ? cache.list_size() : cache.info_size();
+        if(p && n) {
+          std::fprintf(stdout,"%s: idx=%s (mmap) source=%s\n",oec_cmd,idx_path.c_str(),layout.index.c_str());
+          if(std::fwrite(p,1,n,stdout)!=n) return 5;
+          return 0;
+        }
+      } else {
+        std::fprintf(stderr,"%s: idx unavailable (%s); falling back to %s\n",oec_cmd,err.c_str(),layout.index.c_str());
+      }
+    } else if(use_idx && !pass.empty()) {
+      // Validate an existing cache but do not rebuild just to execute a native
+      // option variant. This keeps option-rich list/info exact and cheap.
+      oecidx::Cache cache;
+      if(cache.open(idx_path,layout.index,err))
+        std::fprintf(stdout,"%s: idx=%s valid; native options require zero-part parser\n",oec_cmd,idx_path.c_str());
     }
     std::fprintf(stdout, "%s: metadata=%s\n", oec_cmd, layout.index.c_str());
   } else {
@@ -442,15 +665,23 @@ inline int oec_read_command(int argc, const char* const* argv,
       std::fprintf(stderr, "%s: first data part not found: %s\n", oec_cmd, first.c_str());
       return 3;
     }
-    // Requiring .000 here makes OEC extraction semantics explicit and gives the
-    // future .idx layer an authoritative generation/fingerprint source.
     if (!path_exists(layout.index)) {
       std::fprintf(stderr, "%s: OEC zero-part index not found: %s (run oecinit first)\n",
                    oec_cmd, layout.index.c_str());
       return 3;
     }
-    std::fprintf(stdout, "%s: metadata=%s data=%s\n",
-                 oec_cmd, layout.index.c_str(), layout.pattern.c_str());
+    // Extraction still delegates payload decoding to upstream. An existing idx
+    // is mmap-validated here and is ready for the deeper fragment->part locator
+    // backend; no cache rebuild is forced on the extraction hot path.
+    if(use_idx) {
+      oecidx::Cache cache;
+      if(cache.open(idx_path,layout.index,err))
+        std::fprintf(stdout,"%s: idx=%s valid (metadata accelerator), data=%s\n",oec_cmd,idx_path.c_str(),layout.pattern.c_str());
+      else
+        std::fprintf(stdout,"%s: idx unavailable (%s), data=%s\n",oec_cmd,err.c_str(),layout.pattern.c_str());
+    } else {
+      std::fprintf(stdout, "%s: metadata=%s data=%s\n", oec_cmd, layout.index.c_str(), layout.pattern.c_str());
+    }
   }
 
   std::vector<std::string> child;
@@ -477,6 +708,7 @@ inline void oec_quick_help(const char* exe) {
     "  oec_i ARCHIVE [options...]      optimized info/versions; metadata from .000 only\n"
     "  oec_x ARCHIVE [files/options]   OEC equivalent of native x\n"
     "  oec_e ARCHIVE [files/options]   OEC equivalent of native e\n"
+    "  oec_idx build|verify|info|drop  mmap SSD cache manager\n"
     "  ec create|verify|repair|info    independent EC sidecar operations\n"
     "  oec_version                    show OEC overlay version/build identity\n"
     "\n"
@@ -498,6 +730,7 @@ inline int dispatch_const(int argc, const char* const* argv) {
   if (cmd=="oec_help" || cmd=="oec_h") { oec_quick_help(argv[0]); return 0; }
   if (cmd=="oec_version") { std::fprintf(stdout, "zpaqoec OEC overlay %s (Optimize + Error Correction)\n", kOecOverlayVersion); return 0; }
   if (cmd=="ec") return zfec::cli(argc-1, argv+1);
+  if (cmd=="oec_idx") return oec_idx_command(argc, argv);
   if (cmd=="oec_a") return oec_a(argc, argv);
   if (cmd=="oecinit" || cmd=="oec_init") return oecinit(argc, argv);
   if (cmd=="oec_l") return oec_l(argc, argv);
