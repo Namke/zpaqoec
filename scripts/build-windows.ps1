@@ -20,57 +20,113 @@ if (-not (Test-Path -LiteralPath $ExtHeader)) {
   throw "extension header missing after patch: $ExtHeader"
 }
 
-function Test-MinGWCompiler([string]$Path) {
-  if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+function Probe-MinGWCompiler([string]$Candidate, [bool]$Explicit = $false) {
+  if ([string]::IsNullOrWhiteSpace($Candidate)) { return $null }
+
+  $resolved = $null
   try {
-    $resolved = (Get-Command $Path -ErrorAction Stop).Source
+    # A user supplied full/relative path is a literal filesystem path first.
+    # This avoids PATH/Get-Command alias resolution from substituting Cygwin g++.
+    if (Test-Path -LiteralPath $Candidate -PathType Leaf) {
+      $resolved = (Resolve-Path -LiteralPath $Candidate).Path
+    } else {
+      $cmd = Get-Command $Candidate -CommandType Application -ErrorAction Stop
+      $resolved = $cmd.Source
+      if ([string]::IsNullOrWhiteSpace($resolved)) { $resolved = $cmd.Path }
+    }
   } catch {
-    if (Test-Path -LiteralPath $Path) { $resolved = (Resolve-Path -LiteralPath $Path).Path }
-    else { return $null }
+    if ($Explicit) {
+      throw "Compiler passed with -Compiler was not found: $Candidate"
+    }
+    return $null
   }
-  $target = (& $resolved -dumpmachine 2>$null | Select-Object -First 1)
-  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($target)) { return $null }
-  $target = $target.Trim()
-  if ($target -notmatch '(?i)(mingw|w64)') { return $null }
+
+  $targetLines = @()
+  $exit = $null
+  try {
+    $targetLines = @(& $resolved -dumpmachine 2>&1)
+    $exit = $LASTEXITCODE
+  } catch {
+    if ($Explicit) {
+      throw "Failed to execute compiler '$resolved -dumpmachine': $($_.Exception.Message)"
+    }
+    return $null
+  }
+
+  $target = (($targetLines | Select-Object -First 1) -as [string])
+  if ($null -ne $target) { $target = $target.Trim() }
+
+  if ($exit -ne 0 -or [string]::IsNullOrWhiteSpace($target)) {
+    if ($Explicit) {
+      $joined = ($targetLines -join [Environment]::NewLine)
+      throw @"
+Compiler passed with -Compiler could not be probed:
+  compiler: $resolved
+  command:  -dumpmachine
+  exit:     $exit
+  output:   $joined
+"@
+    }
+    return $null
+  }
+
+  if ($target -notmatch '(?i)(mingw|w64)') {
+    if ($Explicit) {
+      throw @"
+Compiler passed with -Compiler is not a native Windows MinGW-w64 compiler:
+  compiler: $resolved
+  target:   $target
+Expected -dumpmachine to contain 'mingw' or 'w64' (for example x86_64-w64-mingw32).
+"@
+    }
+    return $null
+  }
+
   return [pscustomobject]@{ Path = $resolved; Target = $target }
 }
 
-# zpaqfranz's Windows source must be compiled with a Windows-targeting MinGW toolchain.
-# Do NOT silently accept a Unix/Cygwin g++ found first in PATH: that selects the POSIX
-# code paths (fseeko/ftello/fileno/ftruncate/usleep/realpath/select...) and produces a
-# wall of misleading missing-symbol errors.
-$candidates = @()
-if (-not [string]::IsNullOrWhiteSpace($Compiler)) { $candidates += $Compiler }
-if (-not [string]::IsNullOrWhiteSpace($env:ZPAQFRANZ_GXX)) { $candidates += $env:ZPAQFRANZ_GXX }
-$candidates += @(
-  'C:\msys64\ucrt64\bin\g++.exe',
-  'C:\msys64\mingw64\bin\g++.exe',
-  'C:\mingw64\bin\g++.exe',
-  'C:\mingw\bin\g++.exe',
-  'x86_64-w64-mingw32-g++.exe',
-  'g++.exe'
-)
-
+# If -Compiler was supplied, it is authoritative. Never silently fall back to PATH.
 $Selected = $null
-foreach ($candidate in ($candidates | Select-Object -Unique)) {
-  $probe = Test-MinGWCompiler $candidate
-  if ($null -ne $probe) { $Selected = $probe; break }
+if (-not [string]::IsNullOrWhiteSpace($Compiler)) {
+  $Selected = Probe-MinGWCompiler $Compiler $true
+} else {
+  $candidates = @()
+  if (-not [string]::IsNullOrWhiteSpace($env:ZPAQFRANZ_GXX)) {
+    $candidates += $env:ZPAQFRANZ_GXX
+  }
+  $candidates += @(
+    'C:\msys64\ucrt64\bin\g++.exe',
+    'C:\Programs\msys64\ucrt64\bin\g++.exe',
+    'C:\msys64\mingw64\bin\g++.exe',
+    'C:\Programs\msys64\mingw64\bin\g++.exe',
+    'C:\mingw64\bin\g++.exe',
+    'C:\mingw\bin\g++.exe',
+    'x86_64-w64-mingw32-g++.exe',
+    'g++.exe'
+  )
+
+  foreach ($candidate in ($candidates | Select-Object -Unique)) {
+    $probe = Probe-MinGWCompiler $candidate $false
+    if ($null -ne $probe) { $Selected = $probe; break }
+  }
 }
 
 if ($null -eq $Selected) {
   $pathGxx = $null
   $pathTarget = $null
   try {
-    $pathGxx = (Get-Command g++.exe -ErrorAction Stop).Source
+    $pathCmd = Get-Command g++.exe -CommandType Application -ErrorAction Stop
+    $pathGxx = $pathCmd.Source
+    if ([string]::IsNullOrWhiteSpace($pathGxx)) { $pathGxx = $pathCmd.Path }
     $pathTarget = (& $pathGxx -dumpmachine 2>$null | Select-Object -First 1)
   } catch {}
   $detail = if ($pathGxx) { " PATH g++=$pathGxx target=$pathTarget" } else { "" }
   throw @"
 No Windows-targeting MinGW g++ was found.$detail
 Install/use MSYS2 UCRT64 (recommended by upstream) or pass it explicitly:
-  .\scripts\build-windows.ps1 -Compiler C:\msys64\ucrt64\bin\g++.exe
+  .\scripts\build-windows.ps1 -Compiler C:\Programs\msys64\ucrt64\bin\g++.exe
 Or set:
-  `$env:ZPAQFRANZ_GXX='C:\msys64\ucrt64\bin\g++.exe'
+  `$env:ZPAQFRANZ_GXX='C:\Programs\msys64\ucrt64\bin\g++.exe'
 The compiler target reported by `-dumpmachine` must contain 'mingw' or 'w64'.
 "@
 }

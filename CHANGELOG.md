@@ -1,3 +1,10 @@
+## 0.1.4
+
+- Fixed Windows compiler selection when `-Compiler` is explicitly supplied.
+- Explicit compiler paths are resolved as literal files before PATH lookup.
+- `-Compiler` is now authoritative: a rejected explicit compiler produces its own diagnostic and never falls back to Cygwin `g++`.
+- Added common `C:\Programs\msys64\...` auto-detection paths.
+
 # Changelog
 
 ## 0.1.2

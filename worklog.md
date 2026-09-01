@@ -28,3 +28,7 @@
 - Root cause category: wrong compiler target selected from PATH, not dozens of independent missing POSIX functions.
 - Hardened Windows build to validate `g++ -dumpmachine` and prefer MSYS2 UCRT64 MinGW.
 - Added explicit compiler override and fail-fast diagnostics.
+
+## 0.1.4
+- Corrected PowerShell compiler probe/fallback behavior.
+- Explicit `-Compiler` paths now get literal resolution and direct `-dumpmachine` diagnostics.
