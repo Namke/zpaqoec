@@ -73,6 +73,22 @@ printf 'ensure-stale\n' >> compress.000
 ./zpaqoec oec_idx ensure compress --idx "$TMP/ssd/legacy.idx" >/dev/null
 ./zpaqoec oec_idx verify compress --idx "$TMP/ssd/legacy.idx" >/dev/null
 
+# EOC_TEMP relocates every default idx cache while preserving the established basename.
+mkdir -p "$TMP/eoc-temp" "$TMP/explicit"
+rm -f "$TMP/eoc-temp/compress.idx" "$TMP/explicit/compress.idx" compress.idx
+EOC_TEMP="$TMP/eoc-temp" ./zpaqoec oec_idx rebuild compress >/dev/null
+[ -f "$TMP/eoc-temp/compress.idx" ]
+[ ! -e compress.idx ]
+EOC_TEMP="$TMP/eoc-temp" ./zpaqoec oec_idx verify compress >/dev/null
+: > native_calls.log
+EOC_TEMP="$TMP/eoc-temp" ./zpaqoec oec_l compress >/dev/null
+[ ! -s native_calls.log ] || { echo 'EOC_TEMP mmap hit called native parser'; cat native_calls.log; exit 1; }
+
+# Explicit --idx has higher precedence than EOC_TEMP.
+EOC_TEMP="$TMP/eoc-temp" ./zpaqoec oec_idx rebuild compress --idx "$TMP/explicit/compress.idx" >/dev/null
+[ -f "$TMP/explicit/compress.idx" ]
+EOC_TEMP="$TMP/eoc-temp" ./zpaqoec oec_idx verify compress --idx "$TMP/explicit/compress.idx" >/dev/null
+
 ./zpaqoec oec_idx drop compress --idx "$TMP/ssd/compress.idx" >/dev/null
 [ ! -e "$TMP/ssd/compress.idx" ]
 echo 'OEC IDX TESTS PASS'

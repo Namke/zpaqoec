@@ -34,7 +34,7 @@
 namespace zfext {
 
 static const int kNotHandled = -777777;
-static const char* const kOecOverlayVersion = "0.4.0";
+static const char* const kOecOverlayVersion = "0.4.1";
 
 inline std::string zero_suffix(uint64_t n, uint32_t digits) {
   std::ostringstream s; s << std::setw(static_cast<int>(digits)) << std::setfill('0') << n; return s.str();
@@ -95,6 +95,21 @@ inline std::string infer_single_idx(const std::string& archive) {
   if(dot!=std::string::npos && (sep==std::string::npos || dot>sep+0))
     return archive.substr(0,dot)+".idx";
   return archive+".idx";
+}
+
+// Default IDX placement policy. Explicit --idx wins in each command parser.
+// If EOC_TEMP is set, only the directory is replaced; the established IDX
+// basename for the archive layout is preserved.
+inline std::string oec_apply_idx_temp(const std::string& default_path) {
+  const char* env=std::getenv("EOC_TEMP");
+  if(!env || !*env) return default_path;
+  const size_t sep=last_path_separator(default_path);
+  const std::string name=sep==std::string::npos?default_path:default_path.substr(sep+1);
+  std::string dir(env);
+  if(dir.empty()) return default_path;
+  const char tail=dir[dir.size()-1];
+  if(tail=='/' || tail=='\\') return dir+name;
+  return dir+"/"+name;
 }
 
 
@@ -493,7 +508,7 @@ inline int oec_a(int argc, const char* const* argv) {
   zfec::Options ecopt;
   bool protect_trunk=true, protect_part=true;
   bool use_idx=true, refresh_idx=false, idx_explicit=false, idx_plaintext=false, json_force=false, use_gitignore=false;
-  std::string idx_path = single ? infer_single_idx(base) : base + ".idx";
+  std::string idx_path = oec_apply_idx_temp(single ? infer_single_idx(base) : base + ".idx");
   std::vector<std::string> pass;
   for (int i=3;i<argc;++i) {
     std::string a=argv[i];
@@ -681,6 +696,7 @@ inline int oecinit(int argc, const char* const* argv) {
       idx_path = pp.prefix.substr(0,pp.prefix.size()-1) + ".idx";
     else idx_path = index + ".idx";
   }
+  idx_path=oec_apply_idx_temp(idx_path);
 
   bool force = false, protect_trunk = true, protect_parts = true, use_idx = true, idx_plaintext=false;
   zfec::Options ecopt;
@@ -911,12 +927,16 @@ inline bool resolve_oec_read_layout(const std::string& spec, uint32_t digits,
 
 
 inline std::string default_idx_for_layout(const std::string& spec, const OecReadLayout& layout) {
-  if (layout.single) return infer_single_idx(spec);
-  if (spec.find('?') == std::string::npos) return spec + ".idx";
-  PatternParts pp; std::string err;
-  if (parse_qmark_pattern(spec,pp,err) && pp.suffix.empty() && !pp.prefix.empty() && pp.prefix[pp.prefix.size()-1]=='.')
-    return pp.prefix.substr(0,pp.prefix.size()-1) + ".idx";
-  return layout.index + ".idx";
+  std::string out;
+  if (layout.single) out=infer_single_idx(spec);
+  else if (spec.find('?') == std::string::npos) out=spec + ".idx";
+  else {
+    PatternParts pp; std::string err;
+    if (parse_qmark_pattern(spec,pp,err) && pp.suffix.empty() && !pp.prefix.empty() && pp.prefix[pp.prefix.size()-1]=='.')
+      out=pp.prefix.substr(0,pp.prefix.size()-1) + ".idx";
+    else out=layout.index + ".idx";
+  }
+  return oec_apply_idx_temp(out);
 }
 
 
@@ -1851,6 +1871,7 @@ inline void oec_quick_help(const char* exe) {
     "\n"
     "Original zpaqfranz commands remain available unchanged (a, l, i, x, e, ...).\n"
     "Password lookup: if PASSWORD_FOLDER is set and no -key/FRANZKEY is present, OEC tries <archive>.password there before interactive input.\n"
+    "IDX placement: --idx PATH overrides EOC_TEMP; otherwise EOC_TEMP relocates the default cache basename.\n"
     "Use '%s h h' for full upstream help. See docs/OEC_COMMANDS.md for OEC details.\n",
     p, p, p, p, p, p);
 }

@@ -1,4 +1,4 @@
-# OEC IDX format — OECIDX2 (0.4.0)
+# OEC IDX format — OECIDX2 (0.4.1)
 
 `.idx` is a disposable acceleration cache. The `.000` ZPAQ metadata index is authoritative; deleting `.idx` never makes the archive unrecoverable.
 
@@ -26,8 +26,8 @@ INFO                 materialized native i view (compatibility)
 FILE_TABLE           fixed-size structured current-file records
 STRING_POOL          paths, modification timestamps, attributes
 PATH_HASH            sorted FNV-1a(path) -> FILE_TABLE index
-FRAGMENT_TABLE       reserved, empty in 0.4.0
-BLOCK_TABLE          reserved, empty in 0.4.0
+FRAGMENT_TABLE       reserved, empty in 0.4.1
+BLOCK_TABLE          reserved, empty in 0.4.1
 ```
 
 `FILE_TABLE` contains path offset/length, size, modification timestamp, attributes, type, current version, status and compression ratio. `PATH_HASH` is mmap-searchable and verifies each index points to a valid file record.
@@ -38,7 +38,7 @@ The reader accepts both `OECIDX1` and `OECIDX2`. New builds write IDX2. IDX1 con
 
 ## Current RAM/dedup boundary
 
-0.4.0 makes the metadata cache structured, but it does **not** yet replace upstream `Jidac`/`HTIndex` during `oec_a`. The fragment/block sections are intentionally reserved and zero-count until a safe upstream export/dedup hook is implemented. OEC never uses an incomplete fragment table for dedup.
+0.4.1 makes the metadata cache structured, but it does **not** yet replace upstream `Jidac`/`HTIndex` during `oec_a`. The fragment/block sections are intentionally reserved and zero-count until a safe upstream export/dedup hook is implemented. OEC never uses an incomplete fragment table for dedup.
 
 ## Encrypted archives
 

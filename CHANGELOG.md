@@ -1,3 +1,10 @@
+## 0.4.1 - EOC_TEMP default IDX relocation
+
+- Add `EOC_TEMP`: when non-empty, every automatically derived `.idx` path is relocated into that directory while preserving the existing archive-derived basename.
+- Keep precedence `--idx PATH` > `EOC_TEMP` > archive-local default.
+- Apply the resolver consistently to `oecinit`, `oec_a`, `oec_l/i/x/e`, `oec_json`, and all `oec_idx` management actions.
+- Add regression coverage for env relocation, mmap cache reuse through the env path, and explicit-path override.
+
 ## 0.4.0 - OECIDX2 structured cache + migration manager
 
 - Upgrade new cache builds to `OECIDX2`.

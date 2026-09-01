@@ -1,4 +1,4 @@
-# zpaqoec 0.4.0
+# zpaqoec 0.4.1
 
 **OEC = Optimize + Error Correction.**
 
@@ -29,11 +29,27 @@ Original zpaqfranz commands (`a`, `l`, `i`, `x`, `e`, ...) remain available unch
 
 `.idx` is **not required for recovery**. Delete it and OEC can rebuild it from `.000`.
 
+### Default IDX placement with `EOC_TEMP`
+
+If `EOC_TEMP` is non-empty, OEC relocates the **default** `.idx` path into that directory while preserving the archive-derived cache basename. Explicit `--idx PATH` always has higher precedence. If `EOC_TEMP` is unset/empty, the historical default beside the archive is unchanged.
+
+```powershell
+$env:EOC_TEMP = 'X:\OEC-Cache'
+zpaqoec oec_idx ensure E:\Archives\compress
+# cache: X:\OEC-Cache\compress.idx
+
+zpaqoec oec_l E:\Archives\compress
+# automatically uses X:\OEC-Cache\compress.idx
+
+# Explicit path wins over EOC_TEMP:
+zpaqoec oec_idx ensure E:\Archives\compress --idx Y:\Pinned\compress.idx
+```
+
 ## OEC commands
 
 Run `zpaqoec` with no parameters for quick help. Full OEC usage is in [`docs/OEC_COMMANDS.md`](docs/OEC_COMMANDS.md).
 
-| Command | Role | `.idx` behavior in 0.4.0 |
+| Command | Role | `.idx` behavior in 0.4.1 |
 |---|---|---|
 | `oecinit` / `oec_init` | retrofit existing single or multipart archive with `.000` + EC | builds/reuses `.idx` for unencrypted metadata; encrypted `.000` skips plaintext IDX unless `--idx-plaintext` |
 | `oec_a` | incremental add through `.000` + EC | maintains cache lifecycle; `--idx-refresh` refreshes immediately |
@@ -68,11 +84,11 @@ A valid `.idx` list view is consumed via mmap when possible; otherwise OEC perfo
 
 ### Current acceleration boundary
 
-0.4.0 upgrades the mmap cache to **OECIDX2**: structured FILE_TABLE + STRING_POOL + sorted PATH_HASH sections are stored alongside LIST/INFO compatibility views. `oec_l`/`oec_i` still use cached native views for exact presentation, while `oec_json` consumes structured file records directly without reparsing list text.
+0.4.1 upgrades the mmap cache to **OECIDX2**: structured FILE_TABLE + STRING_POOL + sorted PATH_HASH sections are stored alongside LIST/INFO compatibility views. `oec_l`/`oec_i` still use cached native views for exact presentation, while `oec_json` consumes structured file records directly without reparsing list text.
 
 Option-rich forms such as `oec_l compress -all` still call the native `.000` parser so upstream filtering/version semantics remain exact.
 
-`oec_a` still delegates deduplication to upstream `Jidac`. Therefore 0.4.0 does **not** claim that the full fragment/file state has moved out of RAM. The cache file/lifecycle and mmap layer are ready for the deeper HT/DT backend, but correctness takes priority over replacing upstream dedup structures prematurely.
+`oec_a` still delegates deduplication to upstream `Jidac`. Therefore 0.4.1 does **not** claim that the full fragment/file state has moved out of RAM. The cache file/lifecycle and mmap layer are ready for the deeper HT/DT backend, but correctness takes priority over replacing upstream dedup structures prematurely.
 
 Likewise `oec_x/oec_e` still let upstream decode multipart payload. The cache is validated and available, but fragment-to-part direct seeking is not claimed yet.
 
@@ -158,7 +174,7 @@ Precedence is: explicit `-key`/`-franzen` > existing `FRANZKEY` > `PASSWORD_FOLD
 
 ### AES-encrypted archives and IDX
 
-The `.idx` payload contains plaintext filename/metadata sections (IDX2 adds structured records in addition to LIST/INFO). Therefore OEC 0.4.0 does **not** create or automatically use a plaintext `.idx` when the authoritative `.000` is standard AES-encrypted. `oecinit` still completes after producing the payload EC, encrypted `.000`, and `.000.ec`.
+The `.idx` payload contains plaintext filename/metadata sections (IDX2 adds structured records in addition to LIST/INFO). Therefore OEC 0.4.1 does **not** create or automatically use a plaintext `.idx` when the authoritative `.000` is standard AES-encrypted. `oecinit` still completes after producing the payload EC, encrypted `.000`, and `.000.ec`.
 
 To explicitly allow a plaintext SSD cache:
 
@@ -267,7 +283,7 @@ zpaqoec oec_x compress path/to/file -to restore
 zpaqoec oec_e compress path/to/file
 ```
 
-`.000` contains metadata but deliberately omits compressed D blocks, so payload still comes from normal data parts. 0.4.0 does not yet bypass upstream multipart extraction with a fragment locator backend.
+`.000` contains metadata but deliberately omits compressed D blocks, so payload still comes from normal data parts. 0.4.1 does not yet bypass upstream multipart extraction with a fragment locator backend.
 
 ## EC commands
 
@@ -305,13 +321,13 @@ Windows / MSYS2 UCRT64:
 
 The Windows build runs runtime smoke gates for no-arg help, `oec_h`, `oec_version`, and argument-sensitive `oecinit` dispatch before reporting success.
 
-0.4.0 also explicitly uses the Windows CRT `<io.h>` / `<sys/stat.h>` directory APIs for JSON/MD5 filesystem traversal. This fixes current MSYS2 UCRT64 builds where `_finddata64_t` is not a complete public type spelling; OEC uses `_finddata_t` because traversal only needs file names and attributes.
+0.4.1 also explicitly uses the Windows CRT `<io.h>` / `<sys/stat.h>` directory APIs for JSON/MD5 filesystem traversal. This fixes current MSYS2 UCRT64 builds where `_finddata64_t` is not a complete public type spelling; OEC uses `_finddata_t` because traversal only needs file names and attributes.
 
 Current identity:
 
 ```text
 zpaqoec oec_version
-zpaqoec OEC overlay 0.4.0 (Optimize + Error Correction)
+zpaqoec OEC overlay 0.4.1 (Optimize + Error Correction)
 ```
 
 ## Tests
@@ -330,4 +346,4 @@ g++ -std=c++11 -O2 src/zfec_cli.cpp -o zfec
 
 ### zpaqfranz list-format compatibility
 
-0.4.0 accepts multiple `-terse` layouts and falls back to `-all -terse` + current-state collapse when necessary.
+0.4.1 accepts multiple `-terse` layouts and falls back to `-all -terse` + current-state collapse when necessary.

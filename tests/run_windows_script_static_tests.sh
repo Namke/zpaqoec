@@ -19,3 +19,5 @@ grep -Fq 'struct _finddata_t fd' "$H"
 ! grep -Fq '_findfirst64' "$H"
 ! grep -Fq '_findnext64' "$H"
 echo "WINDOWS CRT ENUMERATION STATIC TESTS PASS"
+
+grep -Fq 'EOC_TEMP' "$ROOT/src/zpaqfranz_ext.hpp"
