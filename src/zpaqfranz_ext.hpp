@@ -27,6 +27,34 @@ inline std::string zero_suffix(uint64_t n, uint32_t digits) {
 inline std::string qmarks(uint32_t digits) { return std::string(digits, '?'); }
 inline bool path_exists(const std::string& p) { return zfec::file_exists(p); }
 
+struct PatternParts {
+  std::string prefix;
+  std::string suffix;
+  uint32_t digits = 0;
+};
+
+inline bool parse_qmark_pattern(const std::string& pattern, PatternParts& out, std::string& err) {
+  const size_t q = pattern.find('?');
+  if (q == std::string::npos) { err = "archive pattern must contain ? digits"; return false; }
+  size_t e = q;
+  while (e < pattern.size() && pattern[e] == '?') ++e;
+  if (pattern.find('?', e) != std::string::npos) { err = "only one contiguous ? run is supported"; return false; }
+  const size_t n = e - q;
+  if (n < 1 || n > 9) { err = "? digit count must be 1..9"; return false; }
+  out.prefix = pattern.substr(0, q);
+  out.suffix = pattern.substr(e);
+  out.digits = static_cast<uint32_t>(n);
+  return true;
+}
+
+inline std::string pattern_number(const PatternParts& p, uint64_t n) {
+  return p.prefix + zero_suffix(n, p.digits) + p.suffix;
+}
+
+inline std::string infer_index_from_pattern(const PatternParts& p) {
+  return pattern_number(p, 0);
+}
+
 inline std::string state_path(const std::string& base) { return base + ".ecstate"; }
 
 inline bool read_state(const std::string& base, uint64_t& last) {
@@ -169,11 +197,160 @@ inline int trunkadd(int argc, const char* const* argv) {
   return 0;
 }
 
+
+inline void trunkinit_usage() {
+  std::fprintf(stderr,
+    "Retrofit existing multipart archive with trunk/index + EC:\n"
+    "  trunkinit ARCHIVE_PATTERN [-index INDEX] [--force]\n"
+    "            [--ec-data N] [--ec-shard BYTES] [--ec-stripes N]\n"
+    "            [--no-trunk-ec] [--no-part-ec] [zpaq read options...]\n\n"
+    "Examples:\n"
+    "  zpaqfranz trunkinit \"compress.???\"\n"
+    "  zpaqfranz trunkinit \"backup_????????.zpaq\" -index backup_00000000.zpaq\n"
+    "  zpaqfranz trunkinit \"secret.???\" -key PASSWORD\n\n"
+    "The index path defaults to the archive pattern with ? replaced by 0.\n"
+    "Index generation uses the native ZPAQ extract -index path, so archive parts\n"
+    "are never rewritten. EC sidecars are generated independently for every part.\n");
+}
+
+inline bool replace_file_safely(const std::string& tmp, const std::string& dst, std::string& err) {
+  const std::string bak = dst + ".trunkinit.bak";
+  const bool had = path_exists(dst);
+  if (had) {
+    std::remove(bak.c_str());
+    if (std::rename(dst.c_str(), bak.c_str()) != 0) { err = "cannot move old index aside: " + dst; return false; }
+  }
+  if (std::rename(tmp.c_str(), dst.c_str()) != 0) {
+    if (had) std::rename(bak.c_str(), dst.c_str());
+    err = "cannot install rebuilt index: " + dst;
+    return false;
+  }
+  if (had) std::remove(bak.c_str());
+  return true;
+}
+
+inline int trunkinit(int argc, const char* const* argv) {
+  if (argc < 3) { trunkinit_usage(); return 2; }
+  const std::string exe = argv[0];
+  std::string pattern = argv[2];
+  if (pattern.find('?') == std::string::npos) pattern += ".???";
+
+  PatternParts pp;
+  std::string perr;
+  if (!parse_qmark_pattern(pattern, pp, perr)) { std::fprintf(stderr, "trunkinit: %s\n", perr.c_str()); return 2; }
+
+  std::string index = infer_index_from_pattern(pp);
+  bool force = false, protect_trunk = true, protect_parts = true;
+  zfec::Options ecopt;
+  std::vector<std::string> readopts;
+  for (int i=3;i<argc;++i) {
+    const std::string a = argv[i];
+    if ((a=="-index" || a=="--index") && i+1<argc) index = argv[++i];
+    else if (a=="--force") force = true;
+    else if (a=="--ec-data" && i+1<argc) {
+      if (!zfec::parse_u32(argv[++i], ecopt.data_shards)) { std::fprintf(stderr,"bad --ec-data\n"); return 2; }
+    } else if (a=="--ec-shard" && i+1<argc) {
+      if (!zfec::parse_u32(argv[++i], ecopt.shard_size)) { std::fprintf(stderr,"bad --ec-shard\n"); return 2; }
+    } else if (a=="--ec-stripes" && i+1<argc) {
+      if (!zfec::parse_u32(argv[++i], ecopt.stripes_per_window)) { std::fprintf(stderr,"bad --ec-stripes\n"); return 2; }
+    } else if (a=="--no-trunk-ec") protect_trunk = false;
+    else if (a=="--no-part-ec") protect_parts = false;
+    else readopts.push_back(a);
+  }
+
+  std::string verr;
+  if (!zfec::validate_options(ecopt, verr)) { std::fprintf(stderr,"bad EC options: %s\n",verr.c_str()); return 2; }
+  const std::string first = pattern_number(pp, 1);
+  if (!path_exists(first)) { std::fprintf(stderr,"trunkinit: first archive part not found: %s\n",first.c_str()); return 3; }
+  if (path_exists(index) && !force) {
+    std::fprintf(stderr,"trunkinit: index already exists: %s (use --force to rebuild)\n",index.c_str());
+    return 3;
+  }
+
+  // Build to a temporary path. Native `x -index` reads archive metadata but does not extract files.
+  const std::string tmpindex = index + ".trunkinit.tmp";
+  std::remove(tmpindex.c_str());
+  std::vector<std::string> child;
+  child.push_back("x"); child.push_back(pattern);
+  child.insert(child.end(), readopts.begin(), readopts.end());
+  child.push_back("-index"); child.push_back(tmpindex);
+  child.push_back("-force");
+  std::fprintf(stdout,"trunkinit: rebuilding index %s from %s\n",index.c_str(),pattern.c_str());
+  const int rc = spawn_self(exe, child);
+  if (rc != 0) {
+    std::remove(tmpindex.c_str());
+    std::fprintf(stderr,"trunkinit: native index rebuild failed rc=%d; archive parts were not modified\n",rc);
+    return rc;
+  }
+  if (!path_exists(tmpindex)) {
+    std::fprintf(stderr,"trunkinit: native index rebuild returned success but did not create %s\n",tmpindex.c_str());
+    return 4;
+  }
+  if (!replace_file_safely(tmpindex, index, verr)) { std::fprintf(stderr,"trunkinit: %s\n",verr.c_str()); return 4; }
+
+  uint64_t maxn = 1;
+  for (uint32_t i=0;i<pp.digits;++i) maxn *= 10;
+  maxn -= 1;
+  uint64_t last = 0, created = 0, skipped = 0;
+  std::string err;
+  if (protect_parts) {
+    for (uint64_t n=1;n<=maxn;++n) {
+      const std::string part = pattern_number(pp,n);
+      if (!path_exists(part)) { last = n-1; break; }
+      last = n;
+      const std::string ec = zfec::default_ec_path(part);
+      if (path_exists(ec) && !force) {
+        ++skipped;
+        std::fprintf(stdout,"trunkinit: EC exists, skip %s\n",ec.c_str());
+        continue;
+      }
+      if (!zfec::create(part, ec, ecopt, true, err)) {
+        std::fprintf(stderr,"trunkinit: index is ready, but EC creation failed for %s: %s\n",part.c_str(),err.c_str());
+        return 5;
+      }
+      ++created;
+      std::fprintf(stdout,"trunkinit: protected %s -> %s\n",part.c_str(),ec.c_str());
+    }
+  } else {
+    for (uint64_t n=1;n<=maxn;++n) {
+      const std::string part = pattern_number(pp,n);
+      if (!path_exists(part)) { last=n-1; break; }
+      last=n;
+    }
+  }
+  if (last == 0) { std::fprintf(stderr,"trunkinit: no archive parts found after index rebuild\n"); return 4; }
+
+  if (protect_trunk) {
+    const std::string ec = zfec::default_ec_path(index);
+    if (path_exists(ec) && !force) {
+      ++skipped;
+      std::fprintf(stdout,"trunkinit: trunk EC exists, skip %s\n",ec.c_str());
+    } else if (!zfec::create(index, ec, ecopt, true, err)) {
+      std::fprintf(stderr,"trunkinit: part EC ready, trunk EC failed: %s\n",err.c_str());
+      return 6;
+    } else {
+      ++created;
+      std::fprintf(stdout,"trunkinit: protected trunk %s -> %s\n",index.c_str(),ec.c_str());
+    }
+  }
+
+  // If this is the extension's conventional BASE.??? layout, seed trunkadd state too.
+  if (pp.suffix.empty() && pp.prefix.size() >= 1 && pp.prefix[pp.prefix.size()-1] == '.') {
+    const std::string base = pp.prefix.substr(0, pp.prefix.size()-1);
+    if (!base.empty() && !write_state(base,last))
+      std::fprintf(stderr,"trunkinit: warning: could not write %s\n",state_path(base).c_str());
+  }
+  std::fprintf(stdout,"trunkinit: DONE parts=%llu ec_created=%llu ec_skipped=%llu index=%s\n",
+    (unsigned long long)last,(unsigned long long)created,(unsigned long long)skipped,index.c_str());
+  return 0;
+}
+
 inline int dispatch_const(int argc, const char* const* argv) {
   if (argc < 2 || !argv || !argv[1]) return kNotHandled;
   const std::string cmd=argv[1];
   if (cmd=="ec") return zfec::cli(argc-1, argv+1);
   if (cmd=="trunkadd") return trunkadd(argc, argv);
+  if (cmd=="trunkinit") return trunkinit(argc, argv);
   return kNotHandled;
 }
 

@@ -1,3 +1,13 @@
+# 0.1.1
+
+- Added `trunkinit` to retrofit existing multipart ZPAQ archives.
+- Rebuilds the external zero-part index through native `x ... -index ...` semantics.
+- Generates independent EC sidecars for every existing data part and for the rebuilt trunk.
+- Uses a temporary index and safe replace so a failed rebuild does not modify archive data parts.
+- Supports conventional `BASE.???` and generic contiguous `?` patterns such as `backup_????????.zpaq`.
+- Seeds `BASE.ecstate` automatically for the conventional `BASE.???` layout.
+- Added regression coverage for retrofit, force rebuild, generic `.zpaq` naming, EC verification, and existing trunkadd flow.
+
 # Changelog
 
 ## 0.1.0 - 2026-09-01

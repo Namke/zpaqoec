@@ -1,4 +1,4 @@
-# zpaqfranz-trunkec 0.1.0
+# zpaqfranz-trunkec 0.1.1
 
 Fork overlay for zpaqfranz 64.8 adding:
 
@@ -18,6 +18,55 @@ compress.002
 compress.002.ec
 compress.ecstate      tiny part-number checkpoint; avoids filename walks on normal runs
 ```
+
+
+## Retrofit an existing multipart archive
+
+For archives that were already created without an external trunk/index or EC sidecars:
+
+```bash
+zpaqfranz trunkinit "compress.???"
+```
+
+The zero part is inferred by replacing `?` with `0`, so the command above creates:
+
+```text
+compress.000
+compress.000.ec
+compress.001.ec
+compress.002.ec
+...
+compress.ecstate
+```
+
+The existing `compress.001`, `compress.002`, ... files are **read only** and are never rewritten.
+Internally trunk generation uses native ZPAQ semantics:
+
+```text
+zpaqfranz x "compress.???" -index compress.000
+```
+
+`extract -index` creates the metadata-only index and does not extract payload files. The extension builds the index to a temporary file first and atomically installs it after the native command succeeds.
+
+Generic ZPAQ-style naming is also supported:
+
+```bash
+zpaqfranz trunkinit "backup_????????.zpaq"
+```
+
+which infers `backup_00000000.zpaq` as the index. Override it when required:
+
+```bash
+zpaqfranz trunkinit "backup_????????.zpaq" -index /safe/index/backup.000
+```
+
+Encrypted archives pass normal read options through to the native index builder:
+
+```bash
+zpaqfranz trunkinit "secret.???" -key PASSWORD
+```
+
+By default an existing index is not overwritten. Use `--force` to rebuild the index and regenerate existing EC sidecars. Existing `.ec` files are otherwise skipped.
 
 ## Main workflow
 

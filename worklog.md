@@ -11,3 +11,14 @@
 - Functional tests PASS.
 - ASan/UBSan test run PASS.
 - Real upstream 64.8 monolith build remains to be run after the upstream source file is present locally; the current environment could inspect the public repo but could not materialize its multi-megabyte source file.
+
+## 0.1.1 retrofit command
+
+- Added `trunkinit ARCHIVE_PATTERN`.
+- Uses native ZPAQ `extract -index` behavior to build the zero-part metadata index without extracting files.
+- Existing archive parts remain byte-for-byte untouched.
+- Added EC generation for all existing parts and the index.
+- Default no-overwrite behavior; `--force` rebuilds index/EC.
+- `run_ec_tests.sh`: PASS.
+- `run_trunkadd_tests.sh`: PASS.
+- `run_trunkinit_tests.sh`: PASS.
