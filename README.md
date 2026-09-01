@@ -1,387 +1,146 @@
-# zpaqfranz: advanced multiversioned archiver, with HW acceleration and SFX (on Windows)
+# zpaqfranz-trunkec 0.1.0
 
-## 🖥️ **[catpaq — Official GUI](https://github.com/fcorbelli/catpaq)** open-source ready to use on many platforms
+Fork overlay for zpaqfranz 64.8 adding:
 
-### 📥 Direct Downloads (latest versions)
+1. **Trunk/index-first incremental add** through upstream indexed multipart support.
+2. **Independent `.ec` sidecars** (`compress.001.ec`) able to detect and repair accidental bitrot.
 
-[![Windows](https://img.shields.io/badge/Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white)](https://www.francocorbelli.it/catpaq/latest/win64/catpaq.exe)
-[![Debian](https://img.shields.io/badge/Debian-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://www.francocorbelli.it/catpaq/latest/debian/catpaq_debian_000019.zip)
-[![Fedora](https://img.shields.io/badge/Fedora-294172?style=for-the-badge&logo=fedora&logoColor=white)](https://www.francocorbelli.it/catpaq/latest/fedora/catpaq_fedora_000020.zip)
-[![Arch Linux](https://img.shields.io/badge/Arch%20Linux-1793D1?style=for-the-badge&logo=archlinux&logoColor=white)](https://www.francocorbelli.it/catpaq/latest/arch/catpaq_arch_000019.zip)
-[![macOS](https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://www.francocorbelli.it/catpaq/latest/macos/catpaq_macos_000020.zip)
+The extension does not alter the bytes of ZPAQ archive parts. `compress.001`, `compress.002`, ... remain normal ZPAQ multipart files. Recovery information is entirely external.
 
----
+## Output layout
 
-### Swiss army knife for backup and disaster recovery
-like 7z or RAR **on steroids**, with deduplicated 'snapshots' (versions).  
-Conceptually similar to Mac's Time Machine, but **much more efficient**.  
-A zpaq 7.15 fork.
-
-### 📦 zpaqfranz Downloads & Packages
-
-#### 🪟 Windows Binaries
-
-| Variant                  | Download                                                                 | Install command                  | Version | Notes |
-|--------------------------|--------------------------------------------------------------------------|----------------------------------|---------|-------|
-| **Everything**           | [SourceForge](https://sourceforge.net/projects/zpaqfranz/files)          | —                                | ![GitHub](https://img.shields.io/github/v/release/fcorbelli/zpaqfranz?style=for-the-badge) | All files in one place |
-| **Windows 64** (recommended) | [zpaqfranz.exe](http://www.francocorbelli.it/zpaqfranz/win64/zpaqfranz.exe) | `zpaqfranz upgrade -force`      | ![GitHub](https://img.shields.io/github/v/release/fcorbelli/zpaqfranz?style=for-the-badge) | HW acceleration auto-detect (SHA1/SHA2) + self-update |
-| **Windows 32**           | [zpaqfranz32.exe](https://www.francocorbelli.it/zpaqfranz/win32/zpaqfranz32.exe) | `zpaqfranz32 upgrade -force`   | ![GitHub](https://img.shields.io/github/v/release/fcorbelli/zpaqfranz?style=for-the-badge) | Limited RAM/threads – slower |
-| **Windows 64 HW**        | [zpaqfranzhw.exe](http://www.francocorbelli.it/zpaqfranz/win64hw/zpaqfranzhw.exe) | `zpaqfranzhw -force`           | ![GitHub](https://img.shields.io/github/v/release/fcorbelli/zpaqfranz?style=for-the-badge) | Extra SHA1 acceleration (AMD ~+1.5%) – use `-hw` switch |
-| **Windows 64 Full**      | [zpaqfranz-full.exe](http://www.francocorbelli.it/zpaqfranz/win64/zpaqfranz-full.exe) | —                              | ![GitHub](https://img.shields.io/github/v/release/fcorbelli/zpaqfranz?style=for-the-badge) | All libraries included (no internet needed) |
-| **Windows 64 Open**      | [zpaqfranz-open.exe](http://www.francocorbelli.it/zpaqfranz/win64/zpaqfranz-open.exe) | —                              | ![GitHub](https://img.shields.io/github/v/release/fcorbelli/zpaqfranz?style=for-the-badge) | **100% open-source**, no binary blobs – high-security |
-
-#### 🐧 Linux / BSD / Unix Packages
-
-| OS / Distro | Versione | Install command | Demo |
-|-------------|----------|-----------------|------|
-| ![OpenBSD](https://img.shields.io/badge/OpenBSD-F2CA30?style=for-the-badge&logo=openbsd&logoColor=black) | ![](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fopenbsd.app%2F%3Fsearch%3Dzpaqfranz%26format%3Djson%26current%3Don&query=%24..FULLPKGNAME&label=&style=flat-square) | `pkg_add zpaqfranz` | — |
-| ![FreeBSD](https://img.shields.io/badge/FreeBSD-AB2B28?style=for-the-badge&logoColor=white) | ![GitHub](https://img.shields.io/github/v/release/fcorbelli/zpaqfranz?style=flat-square&label=) | `pkg install zpaqfranz` | — |
-| ![macOS](https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white) | ![Homebrew](https://img.shields.io/homebrew/v/zpaqfranz?style=flat-square&label=) | `brew install zpaqfranz` | — |
-| ![openSUSE](https://img.shields.io/badge/openSUSE-73BA25?style=for-the-badge&logo=opensuse&logoColor=white) | ![GitHub](https://img.shields.io/github/v/release/fcorbelli/zpaqfranz?style=flat-square&label=) | `sudo zypper install zpaqfranz` | — |
-| ![Debian](https://img.shields.io/badge/Debian%2013+%20%2F%20Ubuntu-A81D33?style=for-the-badge&logo=debian&logoColor=white) | ![](https://img.shields.io/badge/62.2-blue?style=flat-square) | `apt-get install zpaqfranz` | — |
-| ![Debian](https://img.shields.io/badge/Debian%20.deb-A81D33?style=for-the-badge&logo=debian&logoColor=white) | ![](https://img.shields.io/badge/62.2-blue?style=flat-square) | `sudo apt install zpaqfranz` | [▶️ Desktop](http://www.francocorbelli.it/zpaqfranz/video/debian-deb.mp4) |
-| ![Arch Linux](https://img.shields.io/badge/Arch%20Linux-1793D1?style=for-the-badge&logo=archlinux&logoColor=white) | ![GitHub](https://img.shields.io/github/v/release/fcorbelli/zpaqfranz?style=flat-square&label=) | [AUR (zpaqfranz-git)](https://aur.archlinux.org/packages/zpaqfranz-git) | [▶️ Terminal](http://www.francocorbelli.it/zpaqfranz/video/arch.mp4) |
-| ![Linux](https://img.shields.io/badge/Linux%20generic%2032%2F64-FCC624?style=for-the-badge&logo=linux&logoColor=black) | ![GitHub](https://img.shields.io/github/v/release/fcorbelli/zpaqfranz?style=flat-square&label=) | [Download](http://www.francocorbelli.it/zpaqfranz/linux) | — |
-
-## Classic file archivers (tar, 7z, RAR etc) are obsolete when used for repeated backups (daily, weekly, etc) compared to the ZPAQ algorithm that maintains "snapshots" (versions) of the data. [This is even more true in the case of ASCII dumps of databases (e.g. MySQL/MariaDB)](https://github.com/fcorbelli/zpaqfranz/wiki/Real-world:-SQL-dumps-(MySQL-MariaDB-Postgres-backup))
-
-Let's see.
-Archiving a folder multiple times (5), simulating a daily run Monday-to-Friday, with 7z:
-
-https://user-images.githubusercontent.com/77727889/215149589-0f2d9f91-ea5a-4f60-b587-f2a506148fe9.mp4
-
-Same, but with zpaqfranz:
-
-https://user-images.githubusercontent.com/77727889/215148702-edb8e5bb-8f4e-42bb-9637-6ee98742318a.mp4
-
-_As you can see, the .7z "daily" 5x backups takes ~ 5x the space of the .zpaq_ ones.
-
-![compare](https://user-images.githubusercontent.com/77727889/215150599-83032cc6-06b0-432d-ba3b-b410698e3631.jpg)
-
-## Seeing is believing ("real world")
-
-I thought it's best to show the difference with a more realistic example.  
-
-Physical (small fileserver) Xeon machine with 8 cores, 64GB RAM and NVMe disks, plus Solaris-based NAS, 1Gb ethernet
-
-Rsync update from filesystem to filesystem (real speed):  
-
-https://user-images.githubusercontent.com/77727889/215152167-c6ce107a-6345-4060-b7a7-33ad30b269ee.mp4
-
-
-Rsync update to Solaris NAS (real speed):
-
-https://user-images.githubusercontent.com/77727889/215152259-2baa7001-d838-40de-b56c-6fe3feff9f1b.mp4
-
-
-Backup update from file system with zpaqfranz (real speed):  
-
-https://user-images.githubusercontent.com/77727889/215146670-1a11cd5d-6f00-4544-b797-9ca288ae12b1.mp4
-
-Backup upgrade via zfsbackup (real speed):
-
-https://user-images.githubusercontent.com/77727889/215147310-cc760f20-08b8-4088-9d8a-f58f00eac211.mp4
-
-# What?
-
-At every run only data changed since the last execution will be added, creating a new version (the "snapshot").
-It is then possible to restore the data @ the single version, just like snapshots by zfs or virtual machines, but a single-file level.  
-- Keeps a forever-to-ever copy (even thousands of versions), conceptually similar to Mac's time machine, but much more efficiently.  
-- Ideal for virtual machine disk storage (ex backup of vmdk), virtual disks (VHDx) and even TrueCrypt containers.  
-- Easily handles millions of files and tens of TBs of data.  
-- Allows rsync (or zfs replica) copies to the cloud with minimal data transfer and encryption.    
-- Multiple possibilities of data verification, fast, advanced and even paranoid.
-- Some optimizations for modern hardware (aka: SSD, NVMe, multithread).
-- By default triple-check with "chunked" SHA-1, XXHASH64 and CRC-32 (!).  
-  For even higher level of paranoia, it is possible to use others hash algorithms, as
-  - MD5
-  - SHA-1 of the full-file (NIST FIPS 180-4)
-  - XXH3-128
-  - BLAKE3 128
-  - SHA-2-256 (NIST FIPS 180-4)
-  - SHA-3-256 (NIST FIPS 202)
-  - WHIRLPOOL (ISO/IEC 10118-3)
-  - HIGHWAY (64,128,256)
-  - ...And much more.  
-
-
-**No complex (and fragile) repository folders, with hundreds of "whatever", just only a single file!**  
-
-## Windows client? Minimum size (without software) VSS backups
-
-_It is often important to copy the %desktop% folder, Thunderbird's data, %download% and generally the data folders of a Windows system, leaving out the programs._
-
-Real speed (encrypted) update of C: without software (-frugal):  
-
-https://user-images.githubusercontent.com/77727889/215269540-8e2c8641-0d3a-4f67-a243-ab617834c5de.mp4
-
-## Are you a really paranoid Windows user (like me)? You can get sector-level copies of C:, too.
-
-_In this case the space used is obviously larger, as is the execution time, but even the "most difficult" folders are also taken. Deliberately the bitmap of occupied clusters is ignored: If you are paranoid, be all the way down!_  
-
-_It is just like dd; you can't (for now) restore with zpaqfranz. You have to extract to a temporary folder and then use other software (e.g., 7z, OSFMount) to extract the files directly from the image_
-
-Accelerated speed (encrypted) every-sector update of a 256GB C: @ ~150MB/s:
-
-https://user-images.githubusercontent.com/77727889/215271199-94400833-f973-41d2-a018-3f2277a648a9.mp4
-
-
-### To date, there is no software, free or paid, that matches these characteristics.  
-_AFAIK of course._  
-10+ years of developing (2009-now).
-
-**Who made that?**
-
-One of the world's leading scientists in compression.
-
-[No, not me, but this guy](http://mattmahoney.net/) [ZPAQ - Wikipedia](https://en.wikipedia.org/wiki/ZPAQ)
-
-**When?**
-
-From 2009 to 2016.
-
-**Where?**
-
-On a [Russian compression forum](https://encode.su/threads/456-zpaq-updates), one of the most famous, but obviously super-niche.
-
-**Why is it not known as 7z or RAR, despite being enormously superior?**
-
-Due to a lack of users who ... Try it!
-
-**Who are you?**
-
-A user (and a developer) who has proposed and made various improvements to ZPAQ that have been implemented over the years.
-When the author left the project, I made this fork to make the functions I need as a data storage manager.
-
-**Why is it no longer developed? Why should I use your fork?**
-
-Because Dr. Mahoney is now retired and no longer supports it (he... Runs!)
-
-**Why should I trust this? This will be among the 1000 other programs that silently fail and raise problems.**
-
-As the Russians (and Italians) say: Trust me; but check!
-
-**Archiving data requires safety. How can I be sure that I can then extract them without problems?**
-
-It is precisely the portion of the program that I have evolved, implementing a barrage of controls up to the paranoid level and more.
-Let's say there are verification mechanisms which you have probably never seen. Do you want to use SHA-2/SHA-3 to be very confident? You can.
-
-Accelerated speed of real world testing of archive >1GB/s:
-
-https://user-images.githubusercontent.com/77727889/215271989-5a77e1f1-8fba-422b-9e25-24c3f4640eb2.mp4
-
-
-**ZPAQ (zpaqfranz) allows you to NEVER delete data that is stored and will be available forever (in reality, you typically start from scratch every 1,000 or 2,000 or so versions for speed reasons an on HDD. 10K+ on SSD), and restore the files present to each archived version, even if a month or three years ago.**
-
-
-Real-speed updating (on QNAP NAS) of a small server (300GB); ~7GB of Thunderbird mbox become ~6MB (!) in ~4 minutes:
-
-https://user-images.githubusercontent.com/77727889/215268613-e07e385c-0880-4534-ae35-0db8925cee6b.mp4
-
-In this "real world" example (a ~500.000 files / ~500GB file server of a mid-sized enterprise), you will see 1042 "snapshots", stored in 877GB.
-
-```
-root@f-server:/copia1/copiepaq/spaz2020 # zpaqfranz i fserver_condivisioni.zpaq
-zpaqfranz v51.27-experimental snapshot archiver, compiled May 26 2021
-fserver_condivisioni.zpaq:
-1042 versions, 1.538.727 files, 15.716.105 fragments, 877.457.003.477 bytes (817.20 GB)
-Long filenames (>255)     4.526
-
-Version(s) enumerator
--------------------------------------------------------------------------
-< Ver  > <  date  > < time >  < added > <removed>    <    bytes added   >
--------------------------------------------------------------------------
-00000001 2018-01-09 16:56:02  +00308608 -00000000 ->      229.882.913.501
-00000002 2018-01-09 18:06:28  +00007039 -00000340 ->           47.356.864
-00000003 2018-01-10 15:06:25  +00007731 -00000159 ->            7.314.709
-00000004 2018-01-10 15:17:44  +00007006 -00000000 ->              612.584
-00000005 2018-01-10 15:47:03  +00007005 -00000000 ->              611.980
-00000006 2018-01-10 18:03:08  +00008135 -00000829 ->        2.698.417.427
-(...)
-00000011 2018-01-10 19:20:30  +00007007 -00000000 ->              613.273
-00000012 2018-01-11 07:00:36  +00007008 -00000000 ->              613.877
-(...)
-00000146 2018-03-27 17:08:39  +00001105 -00000541 ->          164.399.767
-00000147 2018-03-28 17:08:28  +00000422 -00000134 ->          277.237.055
-00000148 2018-03-29 17:12:02  +00011953 -00011515 ->          826.218.948
-(...)
-00001039 2021-05-02 17:17:42  +00030599 -00031135 ->       12.657.155.316
-00001040 2021-05-03 17:14:03  +00000960 -00000095 ->          398.358.496
-00001041 2021-05-04 17:13:40  +00000605 -00000004 ->           95.909.988
-00001042 2021-05-05 17:15:13  +00000579 -00000008 ->           82.487.415
-
-54.799 seconds (all OK)
+```text
+compress.000          upstream ZPAQ index/trunk
+compress.000.ec       EC for the trunk (small and optional)
+compress.001          normal ZPAQ part
+compress.001.ec       EC sidecar
+compress.002
+compress.002.ec
+compress.ecstate      tiny part-number checkpoint; avoids filename walks on normal runs
 ```
 
-Do you want to restore @ 2018-03-28?
-```
-00000147 2018-03-28 17:08:28  +00000422 -00000134 ->          277.237.055
-```
-Version 147 =>
-```
-zpaqfranz x ... -until 147
-```
-Do you want 2021-03-05?
-Version 984 =>
-```
-zpaqfranz x ... -until 984
-```
-Another real world example: 4900 versions, from mid-2017:
-```
-zpaqfranz v51.10-experimental journaling archiver, compiled Apr  5 2021
-franz:use comment
-old_aserver.zpaq:
+## Main workflow
 
-4904 versions, 385.830 files, 3.515.679 fragments, 199.406.200.193 bytes (185.71
-GB)
-
-Version comments enumerator
-------------
-00000001 2017-08-16 19:26:15  +00090863 -00000000 ->       79.321.339.869
-00000002 2017-08-17 13:29:25  +00000026 -00000000 ->              629.055
-00000003 2017-08-17 13:30:41  +00000005 -00000000 ->               18.103
-00000004 2017-08-17 14:34:12  +00000005 -00000000 ->               18.149
-00000005 2017-08-17 15:28:42  +00000008 -00000000 ->               99.062
-00000006 2017-08-17 19:30:03  +00000008 -00000000 ->            1.013.616
-00000007 2017-08-18 19:33:14  +00000021 -00000001 ->            2.556.335
-00000008 2017-08-19 19:29:23  +00000025 -00000000 ->            1.377.082
-00000009 2017-08-20 19:29:56  +00000002 -00000000 ->               24.153
-00000010 2017-08-21 19:34:35  +00000031 -00000000 ->            2.554.582
-(...)
-00004890 2021-02-16 16:40:51  +00000190 -00000005 ->           99.051.540
-00004891 2021-02-16 19:30:17  +00000065 -00000006 ->           16.467.364
-00004892 2021-02-17 19:34:04  +00000381 -00000257 ->           95.354.305
-(...)
-00004900 2021-02-25 19:35:47  +00000755 -00000611 ->          132.241.557
-00004901 2021-02-26 19:57:16  +00000406 -00000253 ->          122.669.868
-00004902 2021-02-27 20:33:45  +00000029 -00000002 ->           12.677.932
-00004903 2021-02-28 20:34:00  +00000027 -00000001 ->            6.978.088
-00004904 2021-03-01 20:33:52  +00000174 -00000019 ->           77.113.147
+```bash
+zpaqfranz trunkadd compress /data -method 5
 ```
 
-until 2021 (4 years later).
+Internally this invokes the normal zpaqfranz add path as:
 
-This is a ~200GB server:
+```text
+zpaqfranz a compress.??? /data -method 5 -index compress.000
 ```
-(...)
-- 2019-09-23 10:14:44       2.943.578.106  0666 /tank/mboxstorico/inviata_spazzatura__2017_2018
-- 2021-02-18 10:16:25           4.119.172  0666 /tank/mboxstorico/inviata_spazzatura__2017_2018.msf
-- 2019-10-25 15:39:15       1.574.715.392  0666 /tank/mboxstorico/nstmp
-- 2020-11-28 20:33:22           2.038.165  0666 /tank/mboxstorico/nstmp.msf
-- 2021-02-25 17:48:11               8.802  0644 /tank/mboxstorico/sha1.txt
 
-214.379.664.412 (199.66 GB) of 214.379.664.412 (199.66 GB) in 154.975 files shown
+After the new part is committed, the extension writes its EC sidecar and refreshes the trunk EC.
+
+The next run reads `compress.ecstate` to know the expected next part. It does **not** scan old part contents. If `.ecstate` is lost while `compress.000` still exists, it performs a one-time filename-only recovery and recreates the state.
+
+### EC commands
+
+```bash
+zpaqfranz ec create compress.001
+zpaqfranz ec verify compress.001
+zpaqfranz ec repair compress.001 --output compress.001.repaired
+zpaqfranz ec info compress.001.ec
 ```
-so for 4900 versions you need
-200GB*4900 = ~980TB with something like tar, 7z, RAR etc (yes, 980 terabytes),
-versus ~200GB (yes, 200GB) with zpaq.
 
-Same things for virtual machines (vmdks).
+Default repair never overwrites the damaged archive.
 
-## Why do you say uniqueness? We got (hb) hashbackup, borg, restic, bupstash, etc. ##
+## EC v1 format and tolerance
 
-Because other software (sometimes very, very well made) runs on complex "repositories". Very fragile and way too hard to manage (at least for my tastes).  
-It may happen that you have to worry about backing up ... the backup. Maybe some files were lost during a transfer, corrupted, etc.  
-_If it's simple, maybe it will work._
+Default geometry:
 
-## Too good to be true? ##
+```text
+shard size          64 KiB
+data shards         32
+parity shards        2 (P + Q over GF(256))
+stripes/window      64
+window capacity    128 MiB
+nominal parity       6.25%
+```
 
-Obviously this is not "magic", it is simply the "chaining" of a block deduplicator with a compressor and an archiver.
-There are faster compressors.
-There are better compressors.
-There are faster archivers.
-There are more efficient deduplicators.
+Each data shard has CRC32C. Each parity shard also has CRC32C. Metadata has an independent CRC32C.
 
-But what I have never found is a combination of these four that is dead simple to use and reliable, with excellent handling of non-Latin filenames (Chinese, Russian, etc).
+P is XOR parity. Q is weighted GF(256) parity. This allows exact reconstruction of:
 
-This is the key: You don't have to do complex "piping" with tar | srep | zstd | _something_ hoping that everything will work, but instead, all you have to use is a single ~4MB executable, with 7z-like commands.  
-You don't even have to install a complex program with many dependencies that will have to read a folder (the repository) with maybe thousands of files, hoping that they will still be fully functional.
+- one bad data shard with either P or Q available;
+- two bad data shards when both parity shards are intact;
+- one bad data shard even when one parity shard itself has bitrot.
 
-There are also many great features for backups, I mention only the greatest.  
-**The ZPAQ file is "in addition" (appended), it is never actually modified.**
+More than two bad data shards in the same stripe are reported as unrecoverable.
 
-So rsync --append will copy only the new portion added, for example, in an ssh tunnel to a remote server, or local NAS (QNAP etc). Thus, file transfers are absurdly quick.  
-TRANSLATION  
-You can pay ~$4 a month for 1TB cloud-storage-space to store just about everything.
+### Interleave layout
 
-You don't have to copy or synchronize, let's say, 700GB of a tar.gz,7z or whatever, but only (say) the 2GB added to it in the last copy. The first 698GB remain untouched.
+Within a full 128 MiB window, physical shards rotate across 64 stripes:
 
-This opens up the concrete possibility of using VDSL connections (upload ~ 2/4MB /s) to backup even virtual servers hundreds of gigabytes big in just a few minutes.
+```text
+lane0: stripe0, stripe1, ... stripe63
+lane1: stripe0, stripe1, ... stripe63
+...
+```
 
-In this (accelerated) video, the rsync transfer of 2 remote backups: "standard" .zpaq archive (file level) AND zfsbackup (bit-level) for a small real-world server 1 day-update of work: 
+Therefore a contiguous 4 MiB damaged region normally hits one shard per stripe rather than 64 shards in one stripe. A contiguous region up to roughly 8 MiB can normally consume at most the two-parity budget per stripe (alignment and window boundaries still matter).
 
-https://user-images.githubusercontent.com/77727889/215267855-22bf875c-90ee-47d1-8f8f-c2d0fa2ab201.mp4
+## Build against upstream
 
+Fetch the pinned 64.8 source if needed:
 
-**Bonus: for a developer it's just like a "super-git-versioning"**
+```bash
+./scripts/fetch-upstream.sh
+```
 
-In the makefile, just put a zpaq-save-everything at the top and you will keep all the versions of your software, even with libraries, SQL dumps, etc.
-A single archive keeps everything, forever, with just one command (or two, for verification).
-    
-**Defects?**
+Or on Windows PowerShell:
 
-Some.
+```powershell
+.\scripts\fetch-upstream.ps1
+```
 
-The main one is that the listing of files is not very fast, when there are many versions (thousands), due to the structure of the archiver-file-format. 
-*I could get rid of it, but at the cost of breaking the backwards compatibility of the file format, so I don't want to. On versions 52+, there is a workaround (-filelist)*.
+Put upstream `zpaqfranz.cpp` anywhere, then:
 
-It is not the fastest tool out there, with real world performance of 80-200MB/s (depending on the case and HW of course).
-*Not a big deal for me (I have very powerful HW, and/or run nightly cron-tasks)*
+```bash
+python3 scripts/apply_to_upstream.py /path/to/zpaqfranz.cpp
+g++ -O3 -std=c++11 /path/to/zpaqfranz.cpp -o zpaqfranz -pthread
+```
 
-Extraction can require a number of seeks (due to various deduplicated blocks), which can slow down extraction on magnetic disks (but not on SSDs).  
-*If you have plenty of RAM now it is possible to bypass with the w command*
+The injector:
 
-No other significant ones come to mind, except that it is known and used by few
+- copies `zfec.hpp` and `zpaqfranz_ext.hpp` into a sibling `extensions/` directory;
+- adds one include;
+- adds one early dispatcher inside `main()`;
+- leaves all original commands untouched.
 
-**Very hard to use?**  
-It is a tool for power users and administrators, who are used to the command line. A text-based GUI is being developed to make data selection and complex extraction easier (!).  
+It is idempotent.
 
-In this example we want to extract all the .cpp files as .bak from the 1.zpaq archive. This is something you typically cannot do with other archives such as tar, 7z, rar etc.  
-### With a "sort of" WYSIWYG 'composer' 
-First **f** key (find) and entering .cpp  
-Then **s** (search) every .cpp substring  
-Then **r** (replace) with .bak  
-Then **t** (to) for the z:\example folder  
-Finally **x** to run the extraction  
+Windows/MSYS2:
 
-https://user-images.githubusercontent.com/77727889/226925740-d62b92ae-4eee-43ac-94a9-e1a6dae684c1.mp4
+```powershell
+.\scripts\build-windows.ps1 -Upstream C:\src\zpaqfranz\zpaqfranz.cpp
+```
 
+Linux:
 
-**I do not trust you, but I am becoming curious. So?**
+```bash
+./scripts/build-linux.sh /src/zpaqfranz/zpaqfranz.cpp
+```
 
-On **FreeBSD** [you can try to build the port (of paq, inside archivers)](https://www.freshports.org/archivers/paq) but it is very, very, very old (v 6.57 of 2014).  
-You can get a "not too old" zpaqfranz with a `pkg install zpaqfranz`
+## Current implementation boundary
 
-On **OpenBSD** `pkg_add zpaqfranz` is usually up to date.
+0.1.0 creates EC **immediately after the ZPAQ part has finalized**, so it performs one sequential reread of the new part. This already satisfies independent sidecar protection and keeps old parts untouched.
 
-On **Debian** [there is a zpaq 7.15
-package](https://packages.debian.org/zpaq), and starting with Debian
-13 [zpaqfranz is available too](https://packages.debian.org/zpaqfranz).
+The next integration step is to hook the ordered ZPAQ output writer and feed the same output buffers to the EC encoder, eliminating that reread. The EC format is already windowed/stream-friendly, so this does not require a format change.
 
-You can download the original version (7.15 of 2016) directly from the author's website and compile it, or get the same from github.  
-In this case be careful, because the source is divided into 3 source files, but nothing difficult for the compilation.  
+## Tests
 
-**OK, let's assume I want to try out zpaqfranz. How?**  
+```bash
+g++ -std=c++11 -O2 src/zfec_cli.cpp -o zfec
+./tests/run_ec_tests.sh
+```
 
-From branch 51 all source code is merged in one zpaqfranz.cpp aiming to make it as easy as possible to compile on "strange" systems (NAS, vSphere etc).  
-Updating, compilation and Makefile are now trivial.  
+Covered now:
 
-# How to build
-
-My main development platforms are INTEL Windows (non-Intel Windows (arm) currently unsupported) and FreeBSD.
-
-I rarely use Linux or MacOS or whatever (for compiling), so fixing may be needed.
-
-As explained the program is single file, be careful to link the pthread library.  
-You need it for ESXi too, even if it doesn't work. Don't be afraid, zpaqfranz knows!
-
-### [Almost "universal" (minimal) Makefile](https://github.com/fcorbelli/zpaqfranz/wiki/Quickstart-Makefile)
-### [Quicker and dirtier!](https://github.com/fcorbelli/zpaqfranz/wiki/Quickstart-quicker%E2%80%90and%E2%80%90dirtier)
-### [DEFINEs at compile-time](https://github.com/fcorbelli/zpaqfranz/wiki/Quickstart-How-to-Build)
-### [TARGET EXAMPLES](https://github.com/fcorbelli/zpaqfranz/wiki/Quickstart-Target-examples)
-### [HIDDEN GEMS](https://github.com/fcorbelli/zpaqfranz/wiki/Quickstart-Hidden-gems)
-### [STRANGE THINGS](https://github.com/fcorbelli/zpaqfranz/wiki/Quickstart-Strange-Things)
-
-
-### [Integrated HELP](https://github.com/fcorbelli/zpaqfranz/wiki/HELP-integrated)
-### [Wiki commands](https://github.com/fcorbelli/zpaqfranz/wiki/Command)
+- clean create/verify;
+- two bad shards in one stripe -> byte-identical repair;
+- three bad shards in one stripe -> unrecoverable;
+- tail truncation -> recovered;
+- one bad data shard + one corrupt parity shard -> recovered;
+- AddressSanitizer + UndefinedBehaviorSanitizer pass.
