@@ -22,3 +22,9 @@
 - `run_ec_tests.sh`: PASS.
 - `run_trunkadd_tests.sh`: PASS.
 - `run_trunkinit_tests.sh`: PASS.
+
+### 2026-09-01 / 0.1.3
+- Diagnosed user Windows build log: include path fixed, but compiler selected POSIX code paths across both extension and upstream.
+- Root cause category: wrong compiler target selected from PATH, not dozens of independent missing POSIX functions.
+- Hardened Windows build to validate `g++ -dumpmachine` and prefer MSYS2 UCRT64 MinGW.
+- Added explicit compiler override and fail-fast diagnostics.

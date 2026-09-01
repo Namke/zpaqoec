@@ -9,7 +9,7 @@
 #include <sstream>
 #include <iomanip>
 
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
   #include <process.h>
 #else
   #include <sys/types.h>
@@ -91,7 +91,7 @@ inline int spawn_self(const std::string& exe, const std::vector<std::string>& ar
   av.push_back(exe.c_str());
   for (size_t i=0;i<args.size();++i) av.push_back(args[i].c_str());
   av.push_back(0);
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
   intptr_t r = _spawnv(_P_WAIT, exe.c_str(), av.data());
   return r < 0 ? 127 : static_cast<int>(r);
 #else

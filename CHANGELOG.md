@@ -31,3 +31,13 @@
 - Added source injector for zpaqfranz monolith.
 - Added Linux and Windows/MSYS2 build scripts.
 - Added corruption, truncation, double-loss and sanitizer tests.
+
+## 0.1.3 - 2026-09-01
+
+- Fixed Windows toolchain selection: `build-windows.ps1` now requires a Windows-targeting MinGW compiler instead of blindly invoking the first `g++` in `PATH`.
+- Auto-detects upstream-recommended MSYS2 UCRT64 first (`C:\msys64\ucrt64\bin\g++.exe`), then other MinGW candidates.
+- Added `-Compiler` and `ZPAQFRANZ_GXX` overrides.
+- Prints compiler path and `-dumpmachine` target before compiling.
+- Fails early with a focused diagnostic when `g++` is a Linux/Cygwin/non-MinGW target, preventing misleading POSIX API errors (`fseeko`, `ftello`, `fileno`, `ftruncate`, `usleep`, `realpath`, `select`, etc.).
+- Windows detection in extension headers now also recognizes `__MINGW32__` / `__MINGW64__` defensively.
+- Keeps the explicit upstream include root added in 0.1.2.

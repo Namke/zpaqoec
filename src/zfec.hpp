@@ -15,7 +15,7 @@
 #include <iomanip>
 #include <limits>
 
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
   #include <io.h>
   #include <sys/stat.h>
 #else
@@ -95,7 +95,7 @@ inline bool file_exists(const std::string& p) {
 }
 
 inline bool get_file_size(const std::string& p, uint64_t& out) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
   struct _stat64 st;
   if (_stat64(p.c_str(), &st) != 0) return false;
   out = static_cast<uint64_t>(st.st_size);
@@ -108,7 +108,7 @@ inline bool get_file_size(const std::string& p, uint64_t& out) {
 }
 
 inline bool seek64(FILE* f, uint64_t pos) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
   return _fseeki64(f, static_cast<__int64>(pos), SEEK_SET) == 0;
 #else
   return fseeko(f, static_cast<off_t>(pos), SEEK_SET) == 0;
@@ -118,7 +118,7 @@ inline bool seek64(FILE* f, uint64_t pos) {
 inline bool truncate64(FILE* f, uint64_t size) {
   if (!f) return false;
   std::fflush(f);
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
   return _chsize_s(_fileno(f), static_cast<__int64>(size)) == 0;
 #else
   return ftruncate(fileno(f), static_cast<off_t>(size)) == 0;

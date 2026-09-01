@@ -193,3 +193,27 @@ Covered now:
 - tail truncation -> recovered;
 - one bad data shard + one corrupt parity shard -> recovered;
 - AddressSanitizer + UndefinedBehaviorSanitizer pass.
+
+### Windows compiler selection (0.1.3+)
+
+The Windows build script validates the compiler target before compiling. It prefers the upstream-recommended MSYS2 UCRT64 compiler:
+
+```powershell
+.\scripts\build-windows.ps1 -Compiler C:\msys64\ucrt64\bin\g++.exe
+```
+
+You can also pin it for the current shell:
+
+```powershell
+$env:ZPAQFRANZ_GXX='C:\msys64\ucrt64\bin\g++.exe'
+.\scripts\build-windows.ps1
+```
+
+A valid Windows compiler should report a MinGW target, for example:
+
+```powershell
+C:\msys64\ucrt64\bin\g++.exe -dumpmachine
+# x86_64-w64-mingw32
+```
+
+Do not use a Linux/Cygwin/non-MinGW `g++` to build the Windows binary. If the wrong compiler is selected, upstream takes POSIX code paths and emits errors for `fseeko`, `ftello`, `fileno`, `ftruncate`, `usleep`, `realpath`, `select`, etc.
