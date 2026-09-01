@@ -10,6 +10,7 @@ cp "$ROOT/tests/fake_upstream.cpp" "$TMP/fake.cpp"
 printf '#include "extensions/zpaqfranz_ext.hpp"\n' | cat - "$TMP/fake.cpp" > "$TMP/legacy.cpp"
 mv "$TMP/legacy.cpp" "$TMP/fake.cpp"
 python3 "$ROOT/scripts/apply_to_upstream.py" "$TMP/fake.cpp" >/dev/null
+[ -f "$TMP/extensions/oec_md5.hpp" ]
 sed -i '0,/ZPAQFRANZ_OEC_DISPATCH/s//ZPAQFRANZ_TRUNKEC_DISPATCH/' "$TMP/fake.cpp"
 python3 "$ROOT/scripts/apply_to_upstream.py" "$TMP/fake.cpp" >/dev/null
 
@@ -38,6 +39,6 @@ python3 "$ROOT/scripts/apply_to_upstream.py" "$TMP/fake.cpp" >/dev/null
 
 g++ -std=c++11 -O2 "$TMP/fake.cpp" -o "$TMP/zpaqoec"
 "$TMP/zpaqoec" oec_h | grep -Fq 'OEC (Optimize + Error Correction)'
-"$TMP/zpaqoec" oec_version | grep -Fq 'zpaqoec OEC overlay 0.3.4'
+"$TMP/zpaqoec" oec_version | grep -Fq 'zpaqoec OEC overlay 0.3.5'
 "$TMP/zpaqoec" | grep -Fq 'OEC (Optimize + Error Correction)'
 echo "INJECTOR TESTS PASS"

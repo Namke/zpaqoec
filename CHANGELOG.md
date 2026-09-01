@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.5 - progressive JSON MD5 catalog
+
+- `oec_json --force-md5` extracts the archive once to an isolated temporary tree, calculates whole-file MD5 values, and writes them into the JSON catalog.
+- JSON schema is now format version 2 with `md5`, `md5_source`, `md5_file_count`, and `md5_complete`.
+- `oec_a` progressively refreshes an existing archive JSON after a successful add and calculates MD5 directly from source files.
+- `oec_a --json-force` / `--force-json` creates the JSON when it does not already exist; without the flag, missing JSON remains untouched.
+- Progressive updates retain old MD5 only when file path, size, and modified timestamp are unchanged.
+- JSON replacement is staged through a temporary file; an update failure leaves the old JSON intact and does not invalidate the archive transaction.
+
 ## 0.3.4 - immutable JSON file catalog
 
 - Added `oec_json` with alias `oec_j`.

@@ -128,6 +128,15 @@ int zpaq_main_internal(int argc, const char** argv) {
     } else if(!ex(arc)) {
       std::fprintf(stderr,"fake extract command data not found\n"); return 22;
     }
+    std::string to; for(int i=3;i+1<argc;++i) if(std::string(argv[i])=="-to") to=argv[i+1];
+    if(!to.empty()) {
+#ifdef _WIN32
+      std::string mk="mkdir \""+to+"\\folder\\subdir\" >nul 2>nul";
+#else
+      std::string mk="mkdir -p \""+to+"/folder/subdir\"";
+#endif
+      std::system(mk.c_str()); std::string fp=to+"/folder/file one.txt"; FILE* out=fopen(fp.c_str(),"wb"); if(!out)return 24; for(int i=0;i<1234;++i)fputc((i*11+7)&255,out); fclose(out);
+    }
     std::printf("fake %s payload from %s\n",cmd.c_str(),arc.c_str());
     return 0;
   }

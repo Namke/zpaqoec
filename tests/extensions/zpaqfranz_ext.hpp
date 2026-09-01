@@ -1216,8 +1216,7 @@ inline void oec_json_usage() {
     "  alias: oec_j\n\n"
     "Output is fixed beside the archive and is NEVER overwritten:\n"
     "  aaa???.zpaq -> aaa.json\n"
-    "  bbb.zpaq    -> bbb.json\n"
-    "Direct oec_json never overwrites; oec_a may progressively refresh an existing catalog.\n");
+    "  bbb.zpaq    -> bbb.json\n");
 }
 
 inline int oec_json_command(int argc, const char* const* argv) {
@@ -1501,13 +1500,13 @@ inline void oec_quick_help(const char* exe) {
     "\n"
     "OEC commands:\n"
     "  oecinit | oec_init ARCHIVE     initialize/retrofit single or multipart .000 + EC\n"
-    "  oec_a BASE SOURCE...            optimized add + EC; updates existing JSON MD5 catalog\n"
+    "  oec_a BASE SOURCE...            optimized incremental add using .000 + EC\n"
     "  oec_l ARCHIVE [options...]      optimized list; metadata from .000 only\n"
     "  oec_i ARCHIVE [options...]      optimized info/versions; metadata from .000 only\n"
     "  oec_x ARCHIVE [files/options]   OEC equivalent of native x\n"
     "  oec_e ARCHIVE [files/options]   OEC equivalent of native e\n"
     "  oec_idx build|verify|info|drop  mmap SSD cache manager\n"
-    "  oec_json | oec_j ARCHIVE       write JSON catalog; --force-md5 hashes extracted payload\n"
+    "  oec_json | oec_j ARCHIVE       write immutable JSON file catalog beside archive\n"
     "  ec create|verify|repair|info    independent EC sidecar operations\n"
     "  oec_version                    show OEC overlay version/build identity\n"
     "\n"
