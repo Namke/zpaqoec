@@ -107,7 +107,7 @@ grep -Fq 'stage 2/2 native i requires an archive password' encrypted2.out
 ./zpaqfranz oec_idx verify encrypted2.zpaq >/dev/null
 # Cached list must not replay an auth prompt.
 FAKE_ENCRYPTED=1 ./zpaqfranz oec_l encrypted2.zpaq --idx-plaintext > encrypted2-list.out
-grep -Fq 'fake l metadata' encrypted2-list.out
+grep -Fq 'folder/file one.txt' encrypted2-list.out
 ! grep -Fq 'Enter AES password' encrypted2-list.out
 
 

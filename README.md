@@ -1,4 +1,4 @@
-# zpaqoec 0.3.3
+# zpaqoec 0.3.4
 
 **OEC = Optimize + Error Correction.**
 
@@ -33,7 +33,7 @@ Original zpaqfranz commands (`a`, `l`, `i`, `x`, `e`, ...) remain available unch
 
 Run `zpaqoec` with no parameters for quick help. Full OEC usage is in [`docs/OEC_COMMANDS.md`](docs/OEC_COMMANDS.md).
 
-| Command | Role | `.idx` behavior in 0.3.3 |
+| Command | Role | `.idx` behavior in 0.3.4 |
 |---|---|---|
 | `oecinit` / `oec_init` | retrofit existing single or multipart archive with `.000` + EC | builds/reuses `.idx` for unencrypted metadata; encrypted `.000` skips plaintext IDX unless `--idx-plaintext` |
 | `oec_a` | incremental add through `.000` + EC | maintains cache lifecycle; `--idx-refresh` refreshes immediately |
@@ -42,15 +42,30 @@ Run `zpaqoec` with no parameters for quick help. Full OEC usage is in [`docs/OEC
 | `oec_x` | OEC native `x` equivalent | validates available cache; payload still delegated to multipart native extractor |
 | `oec_e` | OEC native `e` equivalent | same current payload routing as `oec_x` |
 | `oec_idx` | manage disposable mmap cache | `build`, `verify`, `info`, `drop` |
+| `oec_json` / `oec_j` | immutable machine-readable current-file catalog | uses valid mmap list cache when parseable; otherwise one terse `.000` pass |
 | `ec` | EC sidecar operations | `create`, `verify`, `repair`, `info` |
+
+## JSON file catalog
+
+```bash
+zpaqoec oec_json "aaa???.zpaq"
+# writes aaa.json beside the archive
+
+zpaqoec oec_json bbb.zpaq
+# writes bbb.json
+```
+
+`oec_j` is an alias. The output path is intentionally fixed and **never overwritten**. If the JSON already exists, OEC exits before parsing the archive. Each current file record contains path, byte size, modification time, saved attributes, file/directory type, archive version/status, and compression ratio when the native list exposes it.
+
+A whole-file MD5/SHA value is not directly exposed by standard ZPAQ list metadata. OEC therefore emits `hash: null` instead of decompressing payload merely to manufacture a hash. The catalog documents ZPAQ fragment-level SHA-1 integrity separately. A valid `.idx` list view is consumed via mmap when possible; otherwise OEC performs one `l <zero-part> -terse -nocolor` pass.
 
 ### Current acceleration boundary
 
-0.3.3 implements a real mmap-backed cache for the **default metadata views** used by `oec_l` and `oec_i`. On a valid cache hit, these commands do not invoke the native parser for `.000`.
+0.3.4 implements a real mmap-backed cache for the **default metadata views** used by `oec_l` and `oec_i`. On a valid cache hit, these commands do not invoke the native parser for `.000`.
 
 Option-rich forms such as `oec_l compress -all` still call the native `.000` parser so upstream filtering/version semantics remain exact.
 
-`oec_a` still delegates deduplication to upstream `Jidac`. Therefore 0.3.3 does **not** claim that the full fragment/file state has moved out of RAM. The cache file/lifecycle and mmap layer are ready for the deeper HT/DT backend, but correctness takes priority over replacing upstream dedup structures prematurely.
+`oec_a` still delegates deduplication to upstream `Jidac`. Therefore 0.3.4 does **not** claim that the full fragment/file state has moved out of RAM. The cache file/lifecycle and mmap layer are ready for the deeper HT/DT backend, but correctness takes priority over replacing upstream dedup structures prematurely.
 
 Likewise `oec_x/oec_e` still let upstream decode multipart payload. The cache is validated and available, but fragment-to-part direct seeking is not claimed yet.
 
@@ -136,7 +151,7 @@ Precedence is: explicit `-key`/`-franzen` > existing `FRANZKEY` > `PASSWORD_FOLD
 
 ### AES-encrypted archives and IDX
 
-The `.idx` v1 payload contains materialized `l`/`i` metadata in plaintext. Therefore OEC 0.3.3 does **not** create or automatically use a plaintext `.idx` when the authoritative `.000` is standard AES-encrypted. `oecinit` still completes after producing the payload EC, encrypted `.000`, and `.000.ec`.
+The `.idx` v1 payload contains materialized `l`/`i` metadata in plaintext. Therefore OEC 0.3.4 does **not** create or automatically use a plaintext `.idx` when the authoritative `.000` is standard AES-encrypted. `oecinit` still completes after producing the payload EC, encrypted `.000`, and `.000.ec`.
 
 To explicitly allow a plaintext SSD cache:
 
@@ -245,7 +260,7 @@ zpaqoec oec_x compress path/to/file -to restore
 zpaqoec oec_e compress path/to/file
 ```
 
-`.000` contains metadata but deliberately omits compressed D blocks, so payload still comes from normal data parts. 0.3.3 does not yet bypass upstream multipart extraction with a fragment locator backend.
+`.000` contains metadata but deliberately omits compressed D blocks, so payload still comes from normal data parts. 0.3.4 does not yet bypass upstream multipart extraction with a fragment locator backend.
 
 ## EC commands
 
@@ -287,7 +302,7 @@ Current identity:
 
 ```text
 zpaqoec oec_version
-zpaqoec OEC overlay 0.3.3 (Optimize + Error Correction)
+zpaqoec OEC overlay 0.3.4 (Optimize + Error Correction)
 ```
 
 ## Tests

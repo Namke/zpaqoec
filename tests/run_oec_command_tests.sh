@@ -11,6 +11,7 @@ cd "$TMP"
 ./zpaqfranz > noargs.txt
 grep -Fq 'OEC (Optimize + Error Correction)' noargs.txt
 grep -Fq 'oecinit | oec_init' noargs.txt
+grep -Fq 'oec_json | oec_j' noargs.txt
 # Both init spellings are accepted.
 # Build two OEC parts using the new public command.
 ./zpaqfranz oec_a compress dummy-source --ec-data 16 --ec-stripes 8 >/dev/null

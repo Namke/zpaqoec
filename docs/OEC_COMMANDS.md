@@ -1,4 +1,4 @@
-# zpaqoec OEC command guide — 0.3.3
+# zpaqoec OEC command guide — 0.3.4
 
 OEC means **Optimize + Error Correction**. Original zpaqfranz commands remain available unchanged; use the `oec_*` namespace for the fork's optimized/error-corrected workflow.
 
@@ -32,7 +32,7 @@ zpaqoec oec_version
 Expected identity:
 
 ```text
-zpaqoec OEC overlay 0.3.3 (Optimize + Error Correction)
+zpaqoec OEC overlay 0.3.4 (Optimize + Error Correction)
 ```
 
 ## `oecinit` / `oec_init`
@@ -233,7 +233,59 @@ Disable cache lifecycle:
 zpaqoec oec_a compress /data --no-idx
 ```
 
-**0.3.3 boundary:** native zpaqfranz still reconstructs Jidac/fragment/file state for dedup. `.idx` does not yet replace that RAM state.
+**0.3.4 boundary:** native zpaqfranz still reconstructs Jidac/fragment/file state for dedup. `.idx` does not yet replace that RAM state.
+
+## `oec_json` / `oec_j`
+
+Write the current archive file set as UTF-8 JSON beside the archive:
+
+```bash
+zpaqoec oec_json "aaa???.zpaq"   # -> aaa.json
+zpaqoec oec_j bbb.zpaq            # -> bbb.json
+```
+
+The output name is derived from archive identity. Wildcard runs and the separator immediately before them are removed (`backup_????????.zpaq -> backup.json`). The file is **never overwritten**: if it already exists the command exits immediately before reading archive metadata.
+
+Fields per current file include `path`, `size`, `modified`, `attributes`, `type`, `version`, `status`, `compression_ratio_percent`, and `hash`. `hash` is currently `null`: standard ZPAQ list/catalog metadata exposes fragment/chunk SHA-1 integrity but not a stored whole-file MD5/SHA suitable for this field. OEC does not decompress payload solely to calculate one.
+
+Supported OEC metadata options:
+
+```text
+--digits N
+--oec-index PATH
+--idx PATH
+--no-idx
+--idx-plaintext
+-key PASSWORD / -franzen PASSWORD
+```
+
+When a valid `.idx` exists and its list view is parseable, `oec_json` reads it through mmap. Otherwise it performs one native terse list pass against `.000`. `PASSWORD_FOLDER` and `FRANZKEY` work as with the other OEC commands.
+
+Example schema:
+
+```json
+{
+  "format": "zpaqoec-file-list",
+  "format_version": 1,
+  "archive": "aaa???.zpaq",
+  "zero_part": "aaa000.zpaq",
+  "file_count": 1,
+  "total_size": 1234,
+  "files": [
+    {
+      "path": "folder/file one.txt",
+      "size": 1234,
+      "modified": "2026-08-31T12:34:56",
+      "attributes": "0644",
+      "type": "file",
+      "version": 1,
+      "status": "+",
+      "compression_ratio_percent": 87,
+      "hash": null
+    }
+  ]
+}
+```
 
 ## `oec_l`
 
@@ -287,7 +339,7 @@ zpaqoec oec_x compress path/to/file -to restore \
   --idx X:/FastCache/compress.idx
 ```
 
-The cache is validated as OEC metadata acceleration state. Actual payload still comes from multipart data through the native extractor because `.000` contains no D blocks. 0.3.3 does not yet claim direct fragment-to-part seeking.
+The cache is validated as OEC metadata acceleration state. Actual payload still comes from multipart data through the native extractor because `.000` contains no D blocks. 0.3.4 does not yet claim direct fragment-to-part seeking.
 
 ## `oec_e`
 

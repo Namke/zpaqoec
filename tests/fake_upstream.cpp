@@ -112,7 +112,13 @@ int zpaq_main_internal(int argc, const char** argv) {
     if(!fake_auth_if_needed(arc)) return 32;
     if(arc.find('?')!=std::string::npos) { std::fprintf(stderr,"fake metadata command was given multipart pattern\n"); return 20; }
     if(!ex(arc)) return 21;
-    std::printf("fake %s metadata from %s\n",cmd.c_str(),arc.c_str());
+    if(cmd=="l") {
+      std::printf("<<%s>>: 1 versions, 2 files, 1.234 bytes\n",arc.c_str());
+      std::printf("2026-08-31 12:34:56 0644 1.234 87%% 0001|+ folder/file one.txt\n");
+      std::printf("2026-08-31 12:35:00 d0755 0 0%% 0001|+ folder/subdir\n");
+    } else {
+      std::printf("fake i metadata from %s\n",arc.c_str());
+    }
     return 0;
   }
 

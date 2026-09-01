@@ -21,7 +21,7 @@
 namespace zfext {
 
 static const int kNotHandled = -777777;
-static const char* const kOecOverlayVersion = "0.3.3";
+static const char* const kOecOverlayVersion = "0.3.4";
 
 inline std::string zero_suffix(uint64_t n, uint32_t digits) {
   std::ostringstream s; s << std::setw(static_cast<int>(digits)) << std::setfill('0') << n; return s.str();
@@ -141,7 +141,7 @@ inline std::string oec_archive_hint_for_password(int argc, const char* const* ar
   if(!argv || argc<2 || !argv[1]) return std::string();
   const std::string cmd=argv[1];
   if(cmd=="oec_idx") return argc>=4 && argv[3] ? argv[3] : std::string();
-  if(cmd=="oecinit" || cmd=="oec_init" || cmd=="oec_a" || cmd=="oec_l" || cmd=="oec_i" || cmd=="oec_x" || cmd=="oec_e")
+  if(cmd=="oecinit" || cmd=="oec_init" || cmd=="oec_a" || cmd=="oec_l" || cmd=="oec_i" || cmd=="oec_x" || cmd=="oec_e" || cmd=="oec_json" || cmd=="oec_j")
     return argc>=3 && argv[2] ? argv[2] : std::string();
   // Native archive commands remain untouched by OEC after this preflight, but
   // they benefit from the same password-folder lookup before upstream prompts.
@@ -866,6 +866,269 @@ inline std::string default_idx_for_layout(const std::string& spec, const OecRead
   return layout.index + ".idx";
 }
 
+
+struct OecJsonFileRecord {
+  std::string path;
+  uint64_t size;
+  std::string modified;
+  std::string attributes;
+  std::string type;
+  uint64_t version;
+  int ratio_percent;
+  char status;
+  OecJsonFileRecord(): size(0), version(0), ratio_percent(-1), status('+') {}
+};
+
+inline std::string oec_trim_copy(const std::string& in) {
+  size_t a=0, b=in.size();
+  while(a<b && (in[a]==' ' || in[a]=='\t' || in[a]=='\r' || in[a]=='\n')) ++a;
+  while(b>a && (in[b-1]==' ' || in[b-1]=='\t' || in[b-1]=='\r' || in[b-1]=='\n')) --b;
+  return in.substr(a,b-a);
+}
+
+inline std::vector<std::string> oec_split_ws(const std::string& in) {
+  std::vector<std::string> out;
+  size_t i=0;
+  while(i<in.size()) {
+    while(i<in.size() && (in[i]==' ' || in[i]=='\t')) ++i;
+    if(i>=in.size()) break;
+    size_t j=i;
+    while(j<in.size() && in[j]!=' ' && in[j]!='\t') ++j;
+    out.push_back(in.substr(i,j-i)); i=j;
+  }
+  return out;
+}
+
+inline bool oec_parse_grouped_u64(const std::string& token, uint64_t& out) {
+  out=0; bool any=false;
+  for(size_t i=0;i<token.size();++i) {
+    const char c=token[i];
+    if(c>='0' && c<='9') {
+      any=true;
+      const uint64_t d=static_cast<uint64_t>(c-'0');
+      if(out > (UINT64_MAX-d)/10u) return false;
+      out=out*10u+d;
+    } else if(c=='.' || c==',' || c=='\'' || c=='_') {
+      continue;
+    } else return false;
+  }
+  return any;
+}
+
+inline bool oec_parse_u64_digits(const std::string& token, uint64_t& out) {
+  out=0; if(token.empty()) return false;
+  for(size_t i=0;i<token.size();++i) {
+    const char c=token[i]; if(c<'0'||c>'9') return false;
+    const uint64_t d=static_cast<uint64_t>(c-'0');
+    if(out > (UINT64_MAX-d)/10u) return false;
+    out=out*10u+d;
+  }
+  return true;
+}
+
+inline bool oec_looks_iso_date(const std::string& s) {
+  return s.size()==10 && s[4]=='-' && s[7]=='-'
+      && s[0]>='0'&&s[0]<='9' && s[1]>='0'&&s[1]<='9'
+      && s[2]>='0'&&s[2]<='9' && s[3]>='0'&&s[3]<='9';
+}
+
+inline bool oec_parse_list_record_pipe(const std::string& line, OecJsonFileRecord& r) {
+  const size_t bar=line.find('|');
+  if(bar==std::string::npos) return false;
+  const std::string left=oec_trim_copy(line.substr(0,bar));
+  std::string right=oec_trim_copy(line.substr(bar+1));
+  if(right.empty()) return false;
+  const char status=right[0];
+  if(status!='+' && status!='-' && status!='#' && status!='=') return false;
+  right=oec_trim_copy(right.substr(1));
+  if(right.empty() || right=="?") return false;
+  if(left.find("deleted/inacessible")==0 || left.find("deleted/inaccessible")==0) return false;
+  const std::vector<std::string> t=oec_split_ws(left);
+  if(t.size()<4 || !oec_looks_iso_date(t[0])) return false;
+  r.modified=t[0] + (t.size()>1 ? std::string("T")+t[1] : std::string());
+  r.attributes=t.size()>2?t[2]:std::string();
+  if(!oec_parse_grouped_u64(t.size()>3?t[3]:std::string(),r.size)) return false;
+  r.ratio_percent=-1;
+  for(size_t i=4;i<t.size();++i) {
+    if(!t[i].empty() && t[i][t[i].size()-1]=='%') {
+      uint64_t v=0; if(oec_parse_u64_digits(t[i].substr(0,t[i].size()-1),v) && v<=10000) r.ratio_percent=static_cast<int>(v);
+    }
+  }
+  r.version=0;
+  for(size_t i=t.size();i>0;--i) {
+    uint64_t v=0; if(oec_parse_u64_digits(t[i-1],v)) { r.version=v; break; }
+  }
+  r.path=right; r.status=status;
+  bool isdir=false;
+  if(!r.attributes.empty() && r.attributes[0]=='d') isdir=true;
+  if(r.attributes.size()>4 && r.attributes[4]=='D') isdir=true;
+  r.type=isdir?"directory":"file";
+  return true;
+}
+
+// Compatibility parser for older terse/list layouts that omit the |status field:
+//   - 2019-09-23 10:14:44 2.943.578.106 0666 /path/name
+inline bool oec_parse_list_record_legacy(const std::string& line, OecJsonFileRecord& r) {
+  std::string s=oec_trim_copy(line);
+  if(s.size()<3 || (s[0]!='-' && s[0]!='+' && s[0]!='=' && s[0]!='#')) return false;
+  const char status=s[0]; s=oec_trim_copy(s.substr(1));
+  std::vector<std::string> t=oec_split_ws(s);
+  if(t.size()<5 || !oec_looks_iso_date(t[0])) return false;
+  uint64_t sz=0;
+  if(!oec_parse_grouped_u64(t[2],sz)) return false;
+  const size_t p0=s.find(t[4]);
+  if(p0==std::string::npos) return false;
+  r.modified=t[0]+std::string("T")+t[1]; r.size=sz; r.attributes=t[3];
+  r.path=s.substr(p0); r.status=status; r.version=0; r.ratio_percent=-1;
+  bool isdir=!r.attributes.empty() && r.attributes[0]=='d';
+  r.type=isdir?"directory":"file";
+  return true;
+}
+
+inline void oec_parse_file_list(const std::string& text, std::vector<OecJsonFileRecord>& files) {
+  files.clear(); size_t pos=0;
+  while(pos<text.size()) {
+    size_t end=text.find('\n',pos); if(end==std::string::npos) end=text.size();
+    std::string line=text.substr(pos,end-pos); if(!line.empty() && line[line.size()-1]=='\r') line.resize(line.size()-1);
+    OecJsonFileRecord r;
+    if(oec_parse_list_record_pipe(line,r) || oec_parse_list_record_legacy(line,r)) files.push_back(r);
+    pos=end<text.size()?end+1:end;
+  }
+}
+
+inline std::string oec_json_escape(const std::string& s) {
+  static const char* hex="0123456789abcdef";
+  std::string out; out.reserve(s.size()+16);
+  for(size_t i=0;i<s.size();++i) {
+    const unsigned char c=static_cast<unsigned char>(s[i]);
+    switch(c) {
+      case '"': out+="\\\""; break;
+      case '\\': out+="\\\\"; break;
+      case '\b': out+="\\b"; break;
+      case '\f': out+="\\f"; break;
+      case '\n': out+="\\n"; break;
+      case '\r': out+="\\r"; break;
+      case '\t': out+="\\t"; break;
+      default:
+        if(c<0x20) { out+="\\u00"; out+=hex[(c>>4)&15]; out+=hex[c&15]; }
+        else out+=static_cast<char>(c);
+    }
+  }
+  return out;
+}
+
+inline std::string oec_json_output_path(const std::string& archive_spec) {
+  const size_t sep=last_path_separator(archive_spec);
+  const std::string dir=sep==std::string::npos?std::string():archive_spec.substr(0,sep+1);
+  return dir + oec_password_stem_from_archive(archive_spec) + ".json";
+}
+
+inline bool oec_write_json_catalog(const std::string& output_path, const std::string& spec,
+                                   const std::string& zero_part, const std::string& source_kind,
+                                   const std::vector<OecJsonFileRecord>& files, std::string& err) {
+  if(path_exists(output_path)) { err="output already exists, refusing to overwrite: "+output_path; return false; }
+  FILE* f=std::fopen(output_path.c_str(),"wb");
+  if(!f) { err="cannot create JSON output: "+output_path; return false; }
+  uint64_t total=0; for(size_t i=0;i<files.size();++i) total+=files[i].size;
+  bool ok=true;
+  ok = ok && std::fprintf(f,"{\n  \"format\": \"zpaqoec-file-list\",\n  \"format_version\": 1,\n")>=0;
+  ok = ok && std::fprintf(f,"  \"archive\": \"%s\",\n",oec_json_escape(spec).c_str())>=0;
+  ok = ok && std::fprintf(f,"  \"zero_part\": \"%s\",\n",oec_json_escape(zero_part).c_str())>=0;
+  ok = ok && std::fprintf(f,"  \"metadata_source\": \"%s\",\n",oec_json_escape(source_kind).c_str())>=0;
+  ok = ok && std::fprintf(f,"  \"oec_version\": \"%s\",\n",kOecOverlayVersion)>=0;
+  ok = ok && std::fprintf(f,"  \"generated_unix\": %llu,\n",(unsigned long long)std::time(0))>=0;
+  ok = ok && std::fprintf(f,"  \"file_count\": %llu,\n  \"total_size\": %llu,\n",
+                          (unsigned long long)files.size(),(unsigned long long)total)>=0;
+  ok = ok && std::fprintf(f,"  \"hash_info\": {\"whole_file_hash_available\": false, \"zpaq_fragment_integrity\": \"SHA-1\", \"note\": \"ZPAQ catalog metadata does not expose a stored whole-file MD5/SHA value; hash is null unless a future structured backend provides one.\"},\n")>=0;
+  ok = ok && std::fprintf(f,"  \"files\": [\n")>=0;
+  for(size_t i=0;i<files.size() && ok;++i) {
+    const OecJsonFileRecord& r=files[i];
+    ok = std::fprintf(f,
+      "    {\"path\":\"%s\",\"size\":%llu,\"modified\":\"%s\",\"attributes\":\"%s\",\"type\":\"%s\",\"version\":%llu,\"status\":\"%c\",\"compression_ratio_percent\":",
+      oec_json_escape(r.path).c_str(),(unsigned long long)r.size,oec_json_escape(r.modified).c_str(),
+      oec_json_escape(r.attributes).c_str(),r.type.c_str(),(unsigned long long)r.version,r.status)>=0;
+    if(ok) {
+      if(r.ratio_percent>=0) ok=std::fprintf(f,"%d",r.ratio_percent)>=0;
+      else ok=std::fprintf(f,"null")>=0;
+    }
+    if(ok) ok=std::fprintf(f,",\"hash\":null}%s\n",i+1<files.size()?",":"")>=0;
+  }
+  if(ok) ok=std::fprintf(f,"  ]\n}\n")>=0;
+  if(std::fclose(f)!=0) ok=false;
+  if(!ok) { std::remove(output_path.c_str()); err="failed while writing JSON output: "+output_path; return false; }
+  return true;
+}
+
+inline void oec_json_usage() {
+  std::fprintf(stderr,
+    "OEC JSON file catalog:\n"
+    "  oec_json ARCHIVE [--digits N] [--oec-index PATH] [--idx PATH] [--no-idx] [--idx-plaintext] [-key PASSWORD]\n"
+    "  alias: oec_j\n\n"
+    "Output is fixed beside the archive and is NEVER overwritten:\n"
+    "  aaa???.zpaq -> aaa.json\n"
+    "  bbb.zpaq    -> bbb.json\n");
+}
+
+inline int oec_json_command(int argc, const char* const* argv) {
+  if(argc<3) { oec_json_usage(); return 2; }
+  const std::string exe=argv[0], spec=argv[2];
+  uint32_t digits=3; std::string index_override, idx_override; bool use_idx=true, idx_plaintext=false;
+  std::vector<std::string> auth;
+  for(int i=3;i<argc;++i) {
+    const std::string a=argv[i];
+    if(a=="--digits" && i+1<argc) { if(!zfec::parse_u32(argv[++i],digits)||digits<1||digits>9){std::fprintf(stderr,"oec_json: bad --digits\n");return 2;} }
+    else if(a=="--oec-index" && i+1<argc) index_override=argv[++i];
+    else if(a=="--idx" && i+1<argc) { idx_override=argv[++i]; use_idx=true; }
+    else if(a=="--no-idx") use_idx=false;
+    else if(a=="--idx-plaintext") { idx_plaintext=true; use_idx=true; }
+    else if((a=="-key" || a=="-franzen") && i+1<argc) { auth.push_back(a); auth.push_back(argv[++i]); }
+    else { std::fprintf(stderr,"oec_json: unknown option %s\n",a.c_str()); return 2; }
+  }
+  const std::string output=oec_json_output_path(spec);
+  if(output.empty() || output==".json") { std::fprintf(stderr,"oec_json: cannot infer output JSON path\n"); return 2; }
+  // Deliberately check BEFORE opening/parsing the archive. Existing catalogs are immutable by default.
+  if(path_exists(output)) { std::fprintf(stderr,"oec_json: output already exists, refusing to overwrite: %s\n",output.c_str()); return 3; }
+
+  OecReadLayout layout; std::string err;
+  if(!resolve_oec_read_layout(spec,digits,index_override,layout,err)){std::fprintf(stderr,"oec_json: %s\n",err.c_str());return 2;}
+  if(!path_exists(layout.index)){std::fprintf(stderr,"oec_json: OEC zero-part index not found: %s (run oecinit first)\n",layout.index.c_str());return 4;}
+  const std::string idx_path=idx_override.empty()?default_idx_for_layout(spec,layout):idx_override;
+
+  std::string listing, source_kind="zero-part-terse";
+  bool got_from_idx=false;
+  bool encrypted=false; std::string encerr;
+  const bool enc_known=oec_file_looks_standard_aes_encrypted(layout.index,encrypted,encerr);
+  if(use_idx && (!enc_known || !encrypted || idx_plaintext)) {
+    oecidx::Cache cache;
+    if(cache.open(idx_path,layout.index,err) && cache.has_list()) {
+      listing.assign(cache.list_data(),cache.list_size());
+      source_kind="idx-mmap"; got_from_idx=true;
+    }
+  }
+  std::vector<OecJsonFileRecord> files;
+  if(got_from_idx) oec_parse_file_list(listing,files);
+  // Old/current IDX list text may be a human-oriented layout that is not parseable
+  // enough for a lossless catalog. Fall back to one native terse pass in that case.
+  if(!got_from_idx || files.empty()) {
+    std::vector<std::string> args; args.push_back("l"); args.push_back(layout.index); args.push_back("-terse"); args.push_back("-nocolor");
+    args.insert(args.end(),auth.begin(),auth.end());
+    std::string caperr; int rc=spawn_self_capture(exe,args,listing,caperr,"oec_json native l -terse");
+    if(rc!=0){std::fprintf(stderr,"oec_json: native terse list failed rc=%d%s%s\n",rc,caperr.empty()?"":" (",caperr.empty()?"":caperr.c_str());return 5;}
+    oec_strip_auth_chatter(listing); files.clear(); oec_parse_file_list(listing,files); source_kind="zero-part-terse";
+  }
+  if(files.empty()) {
+    // Empty archives are valid, but a non-empty native output with no recognized records likely means format drift.
+    if(listing.find("0 files") == std::string::npos && listing.find("0 file") == std::string::npos) {
+      std::fprintf(stderr,"oec_json: could not parse file records from zpaqfranz list output; JSON was not created\n"); return 6;
+    }
+  }
+  if(!oec_write_json_catalog(output,spec,layout.index,source_kind,files,err)) { std::fprintf(stderr,"oec_json: %s\n",err.c_str()); return 7; }
+  uint64_t total=0; for(size_t i=0;i<files.size();++i) total+=files[i].size;
+  std::fprintf(stdout,"oec_json: wrote %s (%llu files, %llu bytes, source=%s)\n",output.c_str(),
+               (unsigned long long)files.size(),(unsigned long long)total,source_kind.c_str());
+  return 0;
+}
+
 inline int oec_idx_command(int argc, const char* const* argv) {
   if (argc < 4) {
     std::fprintf(stderr,
@@ -1068,6 +1331,7 @@ inline void oec_quick_help(const char* exe) {
     "  oec_x ARCHIVE [files/options]   OEC equivalent of native x\n"
     "  oec_e ARCHIVE [files/options]   OEC equivalent of native e\n"
     "  oec_idx build|verify|info|drop  mmap SSD cache manager\n"
+    "  oec_json | oec_j ARCHIVE       write immutable JSON file catalog beside archive\n"
     "  ec create|verify|repair|info    independent EC sidecar operations\n"
     "  oec_version                    show OEC overlay version/build identity\n"
     "\n"
@@ -1093,6 +1357,7 @@ inline int dispatch_const(int argc, const char* const* argv) {
   if (cmd=="oec_version") { std::fprintf(stdout, "zpaqoec OEC overlay %s (Optimize + Error Correction)\n", kOecOverlayVersion); return 0; }
   if (cmd=="ec") return zfec::cli(argc-1, argv+1);
   if (cmd=="oec_idx") return oec_idx_command(argc, argv);
+  if (cmd=="oec_json" || cmd=="oec_j") return oec_json_command(argc, argv);
   if (cmd=="oec_a") return oec_a(argc, argv);
   if (cmd=="oecinit" || cmd=="oec_init") return oecinit(argc, argv);
   if (cmd=="oec_l") return oec_l(argc, argv);

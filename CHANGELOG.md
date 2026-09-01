@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.4 - immutable JSON file catalog
+
+- Added `oec_json` with alias `oec_j`.
+- Writes a UTF-8 JSON catalog beside the archive: `aaa???.zpaq -> aaa.json`, `bbb.zpaq -> bbb.json`.
+- Existing JSON is never overwritten: command exits immediately with a clear error before reading the archive.
+- Catalog includes path, byte size, modification timestamp, saved attributes, file/directory type, version, status and compression ratio when available.
+- Whole-file hash is emitted as `null` because standard ZPAQ list metadata does not expose a stored whole-file MD5/SHA; fragment-level SHA-1 integrity is documented separately.
+- Uses an existing valid mmap `.idx` list view when it is parseable; otherwise performs one native `l <000> -terse -nocolor` pass.
+- `PASSWORD_FOLDER`/`FRANZKEY` resolution applies to JSON generation for encrypted zero parts.
+- Added JSON naming, non-overwrite, IDX-hit, single-part, multipart, wildcard and encrypted/password-folder regression tests.
+
 ## 0.3.3 - PASSWORD_FOLDER plaintext key lookup
 
 - Adds `PASSWORD_FOLDER` as an optional password-file source before interactive AES input.

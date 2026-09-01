@@ -1,3 +1,7 @@
+## 0.3.4 - JSON catalog command
+
+Implemented `oec_json` / `oec_j` as an immutable machine-readable current-file catalog. Output naming is derived from the archive identity and separators immediately before wildcard runs are trimmed. Existing JSON causes an immediate non-overwrite failure. The command consumes a valid mmap IDX list view when possible and otherwise uses one terse zero-part list pass. Per-file whole-file hashes remain null because standard list metadata does not expose one; no payload decompression is performed solely for hashing.
+
 ## 0.3.3 - PASSWORD_FOLDER
 
 Implemented password-file preflight at the OEC bridge so it runs before upstream password queries. The resolver never places the plaintext password on the command line; it sets process-local `FRANZKEY`, inherited by native child passes. Regression covers single archive, wildcard naming, direct native metadata command, and FRANZKEY precedence.
