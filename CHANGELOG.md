@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.3 - PASSWORD_FOLDER plaintext key lookup
+
+- Adds `PASSWORD_FOLDER` as an optional password-file source before interactive AES input.
+- Precedence: explicit `-key`/`-franzen` > existing `FRANZKEY` > matching `PASSWORD_FOLDER/<stem>.password` > normal upstream interactive prompt.
+- Naming normalization includes `test???.zpaq -> test.password`, `compress.??? -> compress.password`, `nen.zpaq -> nen.password`, and OEC zero part `nen.000.zpaq -> nen.password`.
+- Reads only the first plaintext line, strips UTF-8 BOM and CR/LF, never prints the password, and exports it to the current process as `FRANZKEY` so native child passes inherit it without command-line exposure.
+- Applies at the OEC bridge before upstream parsing for OEC commands and native `a/e/l/x/i/t`. Missing/unreadable/empty password files retain normal interactive fallback.
+
+## 0.3.2 - encrypted IDX hang/security fix
+
+- Fixes apparent `oecinit` hang after `protected zero part`: IDX materialization spawned native `l`/`i` with captured output, hiding AES password prompts.
+- Adds explicit IDX stage progress and visible authentication-wait diagnostics.
+- Propagates `-key`/`-franzen` authentication options to IDX metadata passes; `FRANZKEY`/`FRANZFRANZEN` are inherited naturally.
+- Standard AES-encrypted zero-part indexes no longer generate plaintext `.idx` metadata caches by default. Use `--idx-plaintext` to opt in.
+- Authentication chatter is stripped from plaintext IDX snapshots.
+- Encrypted OEC metadata commands fall back to the authoritative `.000` parser unless plaintext IDX is explicitly enabled.
+
+
 ## 0.3.1 - legacy single-part OEC mode
 
 - `oecinit` / `oec_init` now detects an exact existing single-file archive such as `archive.zpaq` instead of blindly expanding it to `archive.zpaq.???`.

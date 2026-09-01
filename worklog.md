@@ -1,3 +1,13 @@
+## 0.3.3 - PASSWORD_FOLDER
+
+Implemented password-file preflight at the OEC bridge so it runs before upstream password queries. The resolver never places the plaintext password on the command line; it sets process-local `FRANZKEY`, inherited by native child passes. Regression covers single archive, wildcard naming, direct native metadata command, and FRANZKEY precedence.
+
+## 0.3.2 - encrypted IDX completion/hang fix
+
+- Traced post-`protected zero part` apparent hang to `build_idx_cache`: native `l` and `i` children were waiting for AES passwords while stdout/stderr were captured.
+- Added staged IDX progress, visible password-wait notices, auth-option propagation, prompt chatter stripping, and encrypted-cache privacy policy.
+- Added encrypted single-archive regression including interactive pty password handoff.
+
 # Worklog
 
 ## 0.3.1 - single-part compatibility

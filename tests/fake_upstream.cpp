@@ -1,8 +1,11 @@
+/* ZPAQOEC_BRIDGE_DECL */
+int zfext_oec_dispatch_bridge(int argc, const char* const* argv);
 #include <cstdio>
 #include <cstring>
 #include <string>
 #include <sstream>
 #include <iomanip>
+#include <cstdlib>
 
 static bool ex(const std::string& p){ FILE* f=fopen(p.c_str(),"rb"); if(!f)return false; fclose(f); return true; }
 static bool splitpat(const std::string& pat, std::string& prefix, std::string& suffix, unsigned& digits) {
@@ -19,6 +22,19 @@ static void log_call(int argc, const char* const* argv) {
   std::fprintf(f,"\n"); fclose(f);
 }
 
+
+static bool fake_encrypted(){ const char* e=std::getenv("FAKE_ENCRYPTED"); return e && *e && std::strcmp(e,"0")!=0; }
+static void fake_index_header(FILE* f){ if(std::ftell(f)==0) std::fputs(fake_encrypted()?"Xfake-index\n":"zfake-index\n",f); }
+static bool fake_auth_if_needed(const std::string& arc){
+  (void)arc;
+  if(!fake_encrypted()) return true;
+  const char* fk=std::getenv("FRANZKEY");
+  if(fk && *fk) { std::printf("Archive is AES-encrypted\n(fake FRANZKEY accepted)\n"); std::fflush(stdout); return true; }
+  std::printf("Archive is AES-encrypted\n\nEnter AES password: "); std::fflush(stdout);
+  char pw[256]; if(!std::fgets(pw,sizeof(pw),stdin)) return false;
+  std::printf("****************\n"); std::fflush(stdout); return true;
+}
+
 // Deliberate decoys: real zpaqfranz has platform-conditional entry points.
 // A no-argument main must NEVER receive an argc/argv bridge call.
 #if 0
@@ -26,15 +42,27 @@ int main() { return 98; }
 #endif
 // Parameterized mains are eligible even when conditionally compiled out.
 #if 0
-int main(int argc, char** argv) { return 99; }
+int main(int argc, char** argv) {
+  /* ZPAQFRANZ_OEC_DISPATCH */
+  { const int zfext_rc = zfext_oec_dispatch_bridge(argc, argv); if (zfext_rc != -777777) return zfext_rc; }
+
+ return 99; }
 #endif
 // Multiple internal parser definitions may exist in conditional branches; all
 // eligible textual definitions should be instrumented.
 #if 0
-int zpaq_main_internal(int argc, const char** argv) { return argc + (argv ? 90 : 0); }
+int zpaq_main_internal(int argc, const char** argv) {
+  /* ZPAQFRANZ_OEC_DISPATCH */
+  { const int zfext_rc = zfext_oec_dispatch_bridge(argc, argv); if (zfext_rc != -777777) return zfext_rc; }
+
+ return argc + (argv ? 90 : 0); }
 #endif
 
 int zpaq_main_internal(int argc, const char** argv) {
+  /* ZPAQFRANZ_OEC_DISPATCH */
+  { const int zfext_rc = zfext_oec_dispatch_bridge(argc, argv); if (zfext_rc != -777777) return zfext_rc; }
+
+
   if(argc<3) { std::fprintf(stderr,"fake upstream: missing args\n"); return 2; }
   log_call(argc, argv);
   std::string cmd=argv[1], arc=argv[2], prefix,suffix; unsigned digits=0;
@@ -48,20 +76,21 @@ int zpaq_main_internal(int argc, const char** argv) {
       for(;;++n){ std::string p=pnum(prefix,suffix,digits,n); if(!ex(p)) { arc=p; break; } }
       FILE* f=fopen(arc.c_str(),"wb"); if(!f)return 5;
       for(int i=0;i<3*1024*1024+123;++i) fputc((i*17+n*31)&255,f); fclose(f);
-      FILE* ix=fopen(idx.c_str(),"ab"); if(!ix)return 6; std::fprintf(ix,"part=%u %s\n",n,arc.c_str()); fclose(ix);
+      FILE* ix=fopen(idx.c_str(),"ab"); if(!ix)return 6; fake_index_header(ix); std::fprintf(ix,"part=%u %s\n",n,arc.c_str()); fclose(ix);
       std::printf("fake add wrote %s and %s\n",arc.c_str(),idx.c_str());
       return 0;
     }
     if(!ex(arc) || !ex(idx)) return 3;
     FILE* f=fopen(arc.c_str(),"ab"); if(!f)return 5;
     for(int i=0;i<512*1024+77;++i) fputc((i*19+41)&255,f); fclose(f);
-    FILE* ix=fopen(idx.c_str(),"ab"); if(!ix)return 6; std::fprintf(ix,"single-update %s\n",arc.c_str()); fclose(ix);
+    FILE* ix=fopen(idx.c_str(),"ab"); if(!ix)return 6; fake_index_header(ix); std::fprintf(ix,"single-update %s\n",arc.c_str()); fclose(ix);
     std::printf("fake single add updated %s and %s\n",arc.c_str(),idx.c_str());
     return 0;
   }
 
   if(cmd=="x" && !idx.empty()) {
-    FILE* ix=fopen(idx.c_str(),"wb"); if(!ix)return 6;
+    if(!fake_auth_if_needed(arc)) return 31;
+    FILE* ix=fopen(idx.c_str(),"wb"); if(!ix)return 6; fake_index_header(ix);
     if(splitpat(arc,prefix,suffix,digits)) {
       unsigned count=0;
       for(unsigned n=1;;++n){
@@ -80,6 +109,7 @@ int zpaq_main_internal(int argc, const char** argv) {
   }
 
   if(cmd=="l" || cmd=="i") {
+    if(!fake_auth_if_needed(arc)) return 32;
     if(arc.find('?')!=std::string::npos) { std::fprintf(stderr,"fake metadata command was given multipart pattern\n"); return 20; }
     if(!ex(arc)) return 21;
     std::printf("fake %s metadata from %s\n",cmd.c_str(),arc.c_str());
@@ -100,5 +130,14 @@ int zpaq_main_internal(int argc, const char** argv) {
 }
 
 int main(int argc, char** argv) {
+  /* ZPAQFRANZ_OEC_DISPATCH */
+  { const int zfext_rc = zfext_oec_dispatch_bridge(argc, argv); if (zfext_rc != -777777) return zfext_rc; }
+
+
   return zpaq_main_internal(argc, const_cast<const char**>(argv));
 }
+
+
+#include "extensions/zpaqfranz_ext.hpp"
+/* ZPAQOEC_BRIDGE_DEF */
+int zfext_oec_dispatch_bridge(int argc, const char* const* argv) { return zfext::dispatch_const(argc, argv); }

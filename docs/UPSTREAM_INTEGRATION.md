@@ -34,7 +34,11 @@ oec_x / oec_e
 
 The ZPAQ zero-part index is the portable metadata source of truth. It contains the journal metadata required to reconstruct the archive catalog but intentionally omits compressed D payload blocks. Therefore metadata-only operations can be accelerated without reading data parts, while extraction still requires the actual multipart data files.
 
-## `.idx` integration in 0.3.1
+## Password preflight bridge
+
+0.3.3 adds a non-invasive pre-parser authentication preflight. It does not modify ZPAQ encryption or key derivation. When `PASSWORD_FOLDER` supplies a matching plaintext password file, zpaqoec sets process-local `FRANZKEY`; upstream remains responsible for all AES authentication/decryption exactly as before. If no password file matches, the bridge returns to normal upstream interactive behavior.
+
+## `.idx` integration in 0.3.3
 
 The `.idx` cache is implemented as a versioned, memory-mapped, transactional sidecar. It is non-authoritative and may live on a local SSD/NVMe independently of the archive. Its source fingerprint is derived from `.000`; if the fingerprint or section checksums do not validate, OEC rejects the cache and falls back to/rebuilds it from `.000`.
 
@@ -42,6 +46,11 @@ Current cache sections accelerate the default `oec_l` and `oec_i` paths without 
 
 ### Deliberate boundary
 
-0.3.1 does **not** replace zpaqfranz's native in-memory `Jidac`/`HTIndex` structures during `a`. Native `oec_a` still reconstructs the file/fragment state from `.000` and uses upstream dedup logic. Likewise `oec_x/oec_e` do not yet use a structured IDX fragment->part/block locator to bypass native multipart extraction.
+0.3.3 does **not** replace zpaqfranz's native in-memory `Jidac`/`HTIndex` structures during `a`. Native `oec_a` still reconstructs the file/fragment state from `.000` and uses upstream dedup logic. Likewise `oec_x/oec_e` do not yet use a structured IDX fragment->part/block locator to bypass native multipart extraction.
 
 A later deep-integration milestone may add a disk-backed fragment/hash backend, but it must preserve upstream dedup semantics and retain `.000` as the recovery authority. The `.idx` file must never become necessary for archive recovery.
+
+### Encrypted IDX behavior (0.3.3)
+
+The current OECIDX1 sections are materialized plaintext metadata views. Standard AES-encrypted zero parts are detected from the ZPAQ encrypted-stream prefix rule; automatic plaintext cache creation/use is disabled unless `--idx-plaintext` is explicitly selected. This also fixes a 0.3.1 dead-wait where captured native `l`/`i` output hid their password prompts.
+

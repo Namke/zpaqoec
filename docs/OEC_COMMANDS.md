@@ -1,4 +1,4 @@
-# zpaqoec OEC command guide — 0.3.1
+# zpaqoec OEC command guide — 0.3.3
 
 OEC means **Optimize + Error Correction**. Original zpaqfranz commands remain available unchanged; use the `oec_*` namespace for the fork's optimized/error-corrected workflow.
 
@@ -32,7 +32,7 @@ zpaqoec oec_version
 Expected identity:
 
 ```text
-zpaqoec OEC overlay 0.3.1 (Optimize + Error Correction)
+zpaqoec OEC overlay 0.3.3 (Optimize + Error Correction)
 ```
 
 ## `oecinit` / `oec_init`
@@ -59,7 +59,7 @@ archive.zpaq          original payload
 archive.zpaq.ec       payload EC (created first)
 archive.000.zpaq      metadata-only zero part
 archive.000.zpaq.ec   zero-part EC
-archive.idx           mmap cache
+archive.idx           mmap cache (unencrypted, or explicit plaintext opt-in)
 ```
 
 The original `archive.zpaq` is not renamed or rewritten by `oec_init`. If zero-part generation fails, OEC returns a partial failure but preserves `archive.zpaq.ec` as the minimum protection layer. Single-file mode does not use `.ecstate`.
@@ -100,6 +100,22 @@ Encrypted archive read options pass to the native index builder:
 zpaqoec oecinit "secret.???" -key PASSWORD
 ```
 
+For standard AES-encrypted `.000`, OEC does **not** create a plaintext `.idx` by default. This avoids leaking filenames/metadata from an encrypted archive into a disposable cache. To opt in deliberately:
+
+```bash
+zpaqoec oecinit "secret.???" -key PASSWORD --idx X:/FastCache/secret.idx --idx-plaintext
+```
+
+Or with zpaqfranz 64.8's password environment variable:
+
+```powershell
+$env:FRANZKEY='PASSWORD'
+zpaqoec.exe oec_init secret.zpaq --idx X:\FastCache\secret.idx --idx-plaintext
+Remove-Item Env:FRANZKEY
+```
+
+If `--idx-plaintext` is selected without a reusable key, IDX materialization runs native `l` and `i` passes. OEC shows `stage 1/2` and `stage 2/2` and explicitly tells you when a password is required.
+
 EC options:
 
 ```text
@@ -109,6 +125,24 @@ EC options:
 --no-index-ec
 --no-part-ec
 ```
+
+## `PASSWORD_FOLDER` automatic password files
+
+Set `PASSWORD_FOLDER` to a directory of plaintext one-line password files. Before an OEC/native archive command reaches upstream password input, zpaqoec derives a password filename from the archive name.
+
+```text
+test???.zpaq  -> test.password
+nen.zpaq      -> nen.password
+```
+
+It also normalizes OEC zero parts such as `nen.000.zpaq -> nen.password`. The password is loaded into process-local `FRANZKEY`, so child `x -index`, `l`, and `i` passes reuse it automatically without putting it on the command line.
+
+```powershell
+$env:PASSWORD_FOLDER='C:\Keys\Zpaq'
+zpaqoec.exe oec_init 'E:\archives\test???.zpaq'
+```
+
+Resolution order: explicit `-key`/`-franzen`, existing `FRANZKEY`, matching password file, then upstream interactive prompt. Only the first line is used; CR/LF and an optional UTF-8 BOM are stripped. Missing/unreadable/empty files preserve the normal interactive fallback.
 
 ## `oec_idx`
 
@@ -142,6 +176,8 @@ For nonstandard layouts:
 zpaqoec oec_idx build "backup_????????.zpaq" \
   --idx X:/FastCache/backup.idx
 ```
+
+For encrypted metadata, add `--idx-plaintext` plus `-key PASSWORD` (or set `FRANZKEY`) if you intentionally want a plaintext cache.
 
 or override authority explicitly:
 
@@ -197,7 +233,7 @@ Disable cache lifecycle:
 zpaqoec oec_a compress /data --no-idx
 ```
 
-**0.3.1 boundary:** native zpaqfranz still reconstructs Jidac/fragment/file state for dedup. `.idx` does not yet replace that RAM state.
+**0.3.3 boundary:** native zpaqfranz still reconstructs Jidac/fragment/file state for dedup. `.idx` does not yet replace that RAM state.
 
 ## `oec_l`
 
@@ -251,7 +287,7 @@ zpaqoec oec_x compress path/to/file -to restore \
   --idx X:/FastCache/compress.idx
 ```
 
-The cache is validated as OEC metadata acceleration state. Actual payload still comes from multipart data through the native extractor because `.000` contains no D blocks. 0.3.1 does not yet claim direct fragment-to-part seeking.
+The cache is validated as OEC metadata acceleration state. Actual payload still comes from multipart data through the native extractor because `.000` contains no D blocks. 0.3.3 does not yet claim direct fragment-to-part seeking.
 
 ## `oec_e`
 
