@@ -1,4 +1,4 @@
-# zpaqoec OEC command guide — 0.3.7
+# zpaqoec OEC command guide — 0.3.8
 
 OEC means **Optimize + Error Correction**. Original zpaqfranz commands remain available unchanged; use the `oec_*` namespace for the fork's optimized/error-corrected workflow.
 
@@ -32,7 +32,7 @@ zpaqoec oec_version
 Expected identity:
 
 ```text
-zpaqoec OEC overlay 0.3.7 (Optimize + Error Correction)
+zpaqoec OEC overlay 0.3.8 (Optimize + Error Correction)
 ```
 
 ## `oecinit` / `oec_init`
@@ -211,6 +211,43 @@ a "compress.???" /data -method 5 -index compress.000
 
 New part EC and zero-part EC are then created/refreshed.
 
+### Recursive ignore filtering
+
+`oec_a` automatically checks every source folder for `zpaq.ignore`. The file uses Git-style patterns and applies recursively below that source root:
+
+```gitignore
+# skip temporary files everywhere
+*.tmp
+
+# skip a whole directory tree
+build/
+cache/**
+
+# re-include one file
+!important.tmp
+
+# root-relative rule
+/secrets.local
+```
+
+Run normally; no switch is needed for `zpaq.ignore`:
+
+```bash
+zpaqoec oec_a backup /data -method 5
+```
+
+To also use `/data/.gitignore`:
+
+```bash
+zpaqoec oec_a backup /data -method 5 -gitignore
+```
+
+Supported rule features include `*`, `?`, `**`, `[abc]`/ranges, comments beginning with `#`, escaped leading `\#`/`\!`, trailing `/` directory rules, leading `/` root anchoring, and `!` negation. Rules are evaluated in file order. When both files are enabled, `.gitignore` is loaded first and `zpaq.ignore` second, so OEC-specific rules can override Git rules.
+
+OEC resolves the final ignored file/directory set before the native add and passes a temporary `-exclude` file to zpaqfranz. The temporary file is removed immediately after add. Progressive JSON/MD5 source hashing uses the same filtered set.
+
+Only the ignore file in each explicitly supplied source folder is loaded; patterns from that file filter descendants recursively. OEC does not automatically discover nested `.gitignore`/`zpaq.ignore` files in subdirectories in 0.3.8.
+
 Cache path:
 
 ```bash
@@ -243,7 +280,7 @@ zpaqoec oec_a compress /data -method 5
 zpaqoec oec_a compress /data -method 5 --json-force
 ```
 
-**0.3.7 boundary:** native zpaqfranz still reconstructs Jidac/fragment/file state for dedup. `.idx` does not yet replace that RAM state.
+**0.3.8 boundary:** native zpaqfranz still reconstructs Jidac/fragment/file state for dedup. `.idx` does not yet replace that RAM state.
 
 ## `oec_json` / `oec_j`
 
@@ -307,7 +344,7 @@ Supported `oec_json` options:
 -key PASSWORD / -franzen PASSWORD
 ```
 
-When a valid `.idx` exists and its list view is parseable, `oec_json` reads it through mmap. Otherwise it performs one native terse list pass against `.000`. Starting in 0.3.7, if that terse layout is not parseable, OEC retries `l -all -terse -nocolor` and collapses the explicit version/status history to the current live set. The parser also accepts pipe-status and plain/legacy layouts, compact/slash timestamps, and strips ANSI escape sequences. `PASSWORD_FOLDER` and `FRANZKEY` work as with the other OEC commands, including the extraction pass used by `--force-md5`.
+When a valid `.idx` exists and its list view is parseable, `oec_json` reads it through mmap. Otherwise it performs one native terse list pass against `.000`. Starting in 0.3.8, if that terse layout is not parseable, OEC retries `l -all -terse -nocolor` and collapses the explicit version/status history to the current live set. The parser also accepts pipe-status and plain/legacy layouts, compact/slash timestamps, and strips ANSI escape sequences. `PASSWORD_FOLDER` and `FRANZKEY` work as with the other OEC commands, including the extraction pass used by `--force-md5`.
 
 ## `oec_l`
 
@@ -361,7 +398,7 @@ zpaqoec oec_x compress path/to/file -to restore \
   --idx X:/FastCache/compress.idx
 ```
 
-The cache is validated as OEC metadata acceleration state. Actual payload still comes from multipart data through the native extractor because `.000` contains no D blocks. 0.3.7 does not yet claim direct fragment-to-part seeking.
+The cache is validated as OEC metadata acceleration state. Actual payload still comes from multipart data through the native extractor because `.000` contains no D blocks. 0.3.8 does not yet claim direct fragment-to-part seeking.
 
 ## `oec_e`
 

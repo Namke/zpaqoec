@@ -1,3 +1,11 @@
+## 0.3.8 - OEC ignore filtering
+
+- Added automatic `zpaq.ignore` filtering to `oec_a`.
+- Added optional `.gitignore` integration via `-gitignore`.
+- Git-style rules are resolved by OEC to final native exclusions before add.
+- Progressive JSON MD5 respects the same filter set.
+- Added dedicated ignore regression suite.
+
 ## 0.3.7 - Windows CRT directory enumeration
 
 Fixed current MSYS2 UCRT64 compilation for JSON/MD5 filesystem walking. OEC now explicitly includes the Windows CRT I/O/stat headers and uses `_finddata_t` with `_findfirst/_findnext`, because the helpers only consume directory-entry names and attributes; actual file sizes remain 64-bit through `_stat64`/MD5 file I/O. Added a static regression for the exact incomplete `_finddata64_t` failure.

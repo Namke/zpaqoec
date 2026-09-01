@@ -46,6 +46,7 @@ int main(int argc, char** argv) {
   /* ZPAQFRANZ_OEC_DISPATCH */
   { const int zfext_rc = zfext_oec_dispatch_bridge(argc, argv); if (zfext_rc != -777777) return zfext_rc; }
 
+
  return 99; }
 #endif
 // Multiple internal parser definitions may exist in conditional branches; all
@@ -55,12 +56,14 @@ int zpaq_main_internal(int argc, const char** argv) {
   /* ZPAQFRANZ_OEC_DISPATCH */
   { const int zfext_rc = zfext_oec_dispatch_bridge(argc, argv); if (zfext_rc != -777777) return zfext_rc; }
 
+
  return argc + (argv ? 90 : 0); }
 #endif
 
 int zpaq_main_internal(int argc, const char** argv) {
   /* ZPAQFRANZ_OEC_DISPATCH */
   { const int zfext_rc = zfext_oec_dispatch_bridge(argc, argv); if (zfext_rc != -777777) return zfext_rc; }
+
 
 
   if(argc<3) { std::fprintf(stderr,"fake upstream: missing args\n"); return 2; }
@@ -70,6 +73,10 @@ int zpaq_main_internal(int argc, const char** argv) {
   for(int i=3;i+1<argc;++i) if(std::string(argv[i])=="-index") idx=argv[i+1];
 
   if(cmd=="a") {
+    for(int ai=3;ai+1<argc;++ai) if(std::string(argv[ai])=="-exclude") {
+      FILE* in=fopen(argv[ai+1],"rb"); FILE* out=fopen("fake_exclude_seen.txt","wb");
+      if(!in||!out){if(in)fclose(in);if(out)fclose(out);return 33;} char b[4096]; size_t n; while((n=fread(b,1,sizeof(b),in))>0)fwrite(b,1,n,out); fclose(in); fclose(out);
+    }
     if(idx.empty()) return 4;
     if(splitpat(arc,prefix,suffix,digits)) {
       unsigned n=1;
@@ -162,8 +169,10 @@ int main(int argc, char** argv) {
   { const int zfext_rc = zfext_oec_dispatch_bridge(argc, argv); if (zfext_rc != -777777) return zfext_rc; }
 
 
+
   return zpaq_main_internal(argc, const_cast<const char**>(argv));
 }
+
 
 
 #include "extensions/zpaqfranz_ext.hpp"

@@ -13,6 +13,8 @@
 #include <map>
 #include <set>
 #include <algorithm>
+#include <cctype>
+#include <ctime>
 
 #if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
   // Windows CRT directory/file APIs used by OEC source walking and temp cleanup.
@@ -32,7 +34,7 @@
 namespace zfext {
 
 static const int kNotHandled = -777777;
-static const char* const kOecOverlayVersion = "0.3.7";
+static const char* const kOecOverlayVersion = "0.3.8";
 
 inline std::string zero_suffix(uint64_t n, uint32_t digits) {
   std::ostringstream s; s << std::setw(static_cast<int>(digits)) << std::setfill('0') << n; return s.str();
@@ -448,8 +450,21 @@ inline bool ensure_idx_cache(const std::string& exe, const std::string& index,
   return true;
 }
 
+struct OecIgnoreRule {
+  std::string pattern; bool negated; bool dir_only; bool has_slash; bool anchored;
+  OecIgnoreRule():negated(false),dir_only(false),has_slash(false),anchored(false){}
+};
+struct OecIgnoreFile { std::string source_root; std::string rel; std::string full; };
+struct OecIgnorePlan {
+  bool active; bool gitignore_enabled; uint64_t scanned_files; uint64_t ignored_files; uint64_t ignored_dirs;
+  std::vector<std::string> rule_files; std::vector<std::string> native_excludes; std::vector<OecIgnoreFile> allowed_files;
+  OecIgnorePlan():active(false),gitignore_enabled(false),scanned_files(0),ignored_files(0),ignored_dirs(0){}
+};
+inline bool oec_prepare_ignore_plan(const std::vector<std::string>& add_args,bool use_gitignore,OecIgnorePlan& plan,std::string& err);
+inline bool oec_write_ignore_exclude_file(const OecIgnorePlan& plan,std::string& path,std::string& err);
+
 inline bool oec_progressive_json_after_add(const std::string& exe,const std::string& archive_spec,const std::string& index,
-                                           const std::vector<std::string>& add_args,bool force_create,std::string& err);
+                                           const std::vector<std::string>& add_args,bool force_create,std::string& err,const OecIgnorePlan* ignore_plan=0);
 
 inline void oec_a_usage() {
   std::fprintf(stderr,
@@ -457,10 +472,12 @@ inline void oec_a_usage() {
     "  oec_a BASE_OR_SINGLE_ARCHIVE <zpaq add source/options...> [--ec-data N] [--ec-shard BYTES]\n"
     "           [--ec-stripes N] [--digits N] [--no-index-ec] [--no-part-ec]\n"
     "           [--idx PATH] [--idx-refresh] [--idx-plaintext] [--no-idx]\n"
-    "           [--json-force|--force-json]\n\n"
+    "           [--json-force|--force-json] [-gitignore]\n\n"
     "Examples:\n"
     "  zpaqoec oec_a compress /data -method 5\n"
     "  zpaqoec oec_a archive.zpaq /data -method 5\n\n"
+    "zpaq.ignore is loaded automatically from each source folder (gitignore-style);\n"
+    "-gitignore also loads .gitignore from each source folder.\n"
     "Multipart mode creates a new BASE.NNN. Single-file mode appends to the\n"
     "existing archive and regenerates its sidecar EC. Both use a .000 metadata index.\n");
 }
@@ -473,7 +490,7 @@ inline int oec_a(int argc, const char* const* argv) {
   uint32_t digits=3;
   zfec::Options ecopt;
   bool protect_trunk=true, protect_part=true;
-  bool use_idx=true, refresh_idx=false, idx_explicit=false, idx_plaintext=false, json_force=false;
+  bool use_idx=true, refresh_idx=false, idx_explicit=false, idx_plaintext=false, json_force=false, use_gitignore=false;
   std::string idx_path = single ? infer_single_idx(base) : base + ".idx";
   std::vector<std::string> pass;
   for (int i=3;i<argc;++i) {
@@ -493,6 +510,7 @@ inline int oec_a(int argc, const char* const* argv) {
     else if (a=="--idx-plaintext") { idx_plaintext=true; use_idx=true; }
     else if (a=="--no-idx") use_idx=false;
     else if (a=="--json-force" || a=="--force-json") json_force=true;
+    else if (a=="-gitignore" || a=="--gitignore") use_gitignore=true;
     else if (a=="-index" || a=="--index" || a=="--oec-index") {
       std::fprintf(stderr,"oec_a owns the OEC zero-part index path; initialize the archive with oecinit first\n"); return 2;
     } else pass.push_back(a);
@@ -501,6 +519,15 @@ inline int oec_a(int argc, const char* const* argv) {
   std::string verr;
   if (!zfec::validate_options(ecopt, verr)) { std::fprintf(stderr,"bad EC options: %s\n",verr.c_str()); return 2; }
   if (pass.empty()) { std::fprintf(stderr,"oec_a: missing source/add arguments\n"); return 2; }
+
+  OecIgnorePlan ignore_plan; std::string ignore_err, ignore_exclude_file;
+  if(!oec_prepare_ignore_plan(pass,use_gitignore,ignore_plan,ignore_err)) { std::fprintf(stderr,"oec_a: ignore preparation failed: %s\n",ignore_err.c_str()); return 2; }
+  if(ignore_plan.active) {
+    std::fprintf(stdout,"oec_a: ignore rules loaded from %llu file(s); scanned=%llu ignored_files=%llu ignored_dirs=%llu\n",
+      (unsigned long long)ignore_plan.rule_files.size(),(unsigned long long)ignore_plan.scanned_files,
+      (unsigned long long)ignore_plan.ignored_files,(unsigned long long)ignore_plan.ignored_dirs);
+    if(!oec_write_ignore_exclude_file(ignore_plan,ignore_exclude_file,ignore_err)) { std::fprintf(stderr,"oec_a: %s\n",ignore_err.c_str()); return 2; }
+  }
 
   std::string data_target;
   std::string index;
@@ -537,9 +564,11 @@ inline int oec_a(int argc, const char* const* argv) {
   std::vector<std::string> child;
   child.push_back("a"); child.push_back(data_target);
   child.insert(child.end(), pass.begin(), pass.end());
+  if(!ignore_exclude_file.empty()){ child.push_back("-exclude"); child.push_back(ignore_exclude_file); }
   child.push_back("-index"); child.push_back(index);
 
   const int rc=spawn_self(exe, child);
+  if(!ignore_exclude_file.empty()) std::remove(ignore_exclude_file.c_str());
   if (rc!=0) { std::fprintf(stderr,"oec_a: zpaq add failed rc=%d; EC not written\n",rc); return rc; }
   if (!path_exists(expected_part)) {
     std::fprintf(stderr,"oec_a: add succeeded but expected data file %s was not found; refusing to guess\n",expected_part.c_str());
@@ -583,7 +612,7 @@ inline int oec_a(int argc, const char* const* argv) {
   }
   {
     std::string jerr;
-    if(!oec_progressive_json_after_add(exe,base,index,pass,json_force,jerr)) {
+    if(!oec_progressive_json_after_add(exe,base,index,pass,json_force,jerr,ignore_plan.active?&ignore_plan:0)) {
       if(!jerr.empty()) { std::fprintf(stderr,"oec_a: archive update is valid, JSON refresh failed: %s\n",jerr.c_str()); return 8; }
     }
   }
@@ -919,7 +948,236 @@ inline std::string oec_basename(std::string p) {
 }
 inline std::string oec_path_join(const std::string& a,const std::string& b){ if(a.empty())return b; if(b.empty())return a; char c=a[a.size()-1]; return (c=='/'||c=='\\')?a+b:a+"/"+b; }
 
-inline int oec_path_kind(const std::string& p, uint64_t* size=0) {
+
+inline int oec_path_kind(const std::string& p, uint64_t* size=0);
+
+inline std::string oec_dirname(std::string p) {
+  while(p.size()>1 && (p[p.size()-1]=='/'||p[p.size()-1]=='\\')) p.resize(p.size()-1);
+  const size_t q=last_path_separator(p);
+  if(q==std::string::npos) return ".";
+  if(q==0) return p.substr(0,1);
+  return p.substr(0,q);
+}
+
+inline bool oec_read_text_lines(const std::string& path,std::vector<std::string>& lines,std::string& err) {
+  lines.clear(); FILE* f=std::fopen(path.c_str(),"rb"); if(!f){err="cannot open ignore file: "+path;return false;}
+  std::string cur; char buf[4096];
+  while(std::fgets(buf,sizeof(buf),f)) {
+    cur += buf;
+    if(!cur.empty() && cur[cur.size()-1]=='\n') {
+      while(!cur.empty() && (cur[cur.size()-1]=='\n'||cur[cur.size()-1]=='\r')) cur.resize(cur.size()-1);
+      lines.push_back(cur); cur.clear();
+    }
+  }
+  if(std::ferror(f)){std::fclose(f);err="cannot read ignore file: "+path;return false;}
+  std::fclose(f); if(!cur.empty()) lines.push_back(cur); return true;
+}
+
+inline bool oec_escaped_at(const std::string& s,size_t pos) {
+  size_t n=0; while(pos>0 && s[pos-1]=='\\'){++n;--pos;} return (n&1)!=0;
+}
+
+inline std::string oec_git_unescape(const std::string& s) {
+  std::string out; out.reserve(s.size());
+  for(size_t i=0;i<s.size();++i) {
+    if(s[i]=='\\' && i+1<s.size() && (s[i+1]=='#'||s[i+1]=='!'||s[i+1]==' '||s[i+1]=='\\')) out+=s[++i];
+    else out+=s[i];
+  }
+  return out;
+}
+
+inline bool oec_parse_ignore_file(const std::string& path,std::vector<OecIgnoreRule>& rules,std::string& err) {
+  std::vector<std::string> lines; if(!oec_read_text_lines(path,lines,err)) return false;
+  for(size_t li=0;li<lines.size();++li) {
+    std::string x=lines[li];
+    // Git ignores unescaped trailing spaces.
+    while(!x.empty() && x[x.size()-1]==' ' && !oec_escaped_at(x,x.size()-1)) x.resize(x.size()-1);
+    if(x.empty()) continue;
+    if(x[0]=='#') continue;
+    OecIgnoreRule r;
+    if(x[0]=='!' && !oec_escaped_at(x,0)) { r.negated=true; x.erase(0,1); }
+    else if(x.size()>=2 && x[0]=='\\' && (x[1]=='!'||x[1]=='#')) x.erase(0,1);
+    if(x.empty()) continue;
+    for(size_t i=0;i<x.size();++i) if(x[i]=='\\' && i+1<x.size() && x[i+1]=='\\') { /* keep escaped slash semantics simple */ }
+    if(!x.empty() && x[0]=='/'){ r.anchored=true; x.erase(0,1); }
+    if(!x.empty() && x[x.size()-1]=='/' && !oec_escaped_at(x,x.size()-1)) { r.dir_only=true; x.resize(x.size()-1); }
+    x=oec_git_unescape(x); for(size_t i=0;i<x.size();++i) if(x[i]=='\\') x[i]='/';
+    while(x.size()>=2 && x[0]=='.' && x[1]=='/') x.erase(0,2);
+    if(x.empty()) continue;
+    r.pattern=x; r.has_slash=(x.find('/')!=std::string::npos); rules.push_back(r);
+  }
+  return true;
+}
+
+inline bool oec_glob_class_match(const std::string& pat,size_t& pi,char c) {
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+  if(c>='A'&&c<='Z') c=(char)(c-'A'+'a');
+#endif
+  bool neg=false,hit=false; ++pi;
+  if(pi<pat.size() && (pat[pi]=='!'||pat[pi]=='^')) {neg=true;++pi;}
+  char prev=0; bool have_prev=false;
+  while(pi<pat.size() && pat[pi]!=']') {
+    char a=pat[pi++];
+    if(a=='\\' && pi<pat.size()) a=pat[pi++];
+    if(a=='-' && have_prev && pi<pat.size() && pat[pi]!=']') {
+      char b=pat[pi++]; if(b=='\\' && pi<pat.size()) b=pat[pi++];
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+      if(b>='A'&&b<='Z')b=(char)(b-'A'+'a');
+#endif
+      if(c>=prev && c<=b) hit=true; have_prev=false; continue;
+    }
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+    if(a>='A'&&a<='Z')a=(char)(a-'A'+'a');
+#endif
+    if(c==a) hit=true; prev=a; have_prev=true;
+  }
+  if(pi<pat.size() && pat[pi]==']') ++pi;
+  return neg?!hit:hit;
+}
+
+inline bool oec_git_glob_rec(const std::string& pat,size_t pi,const std::string& text,size_t ti) {
+  while(pi<pat.size()) {
+    if(pat[pi]=='*') {
+      if(pi+1<pat.size() && pat[pi+1]=='*') {
+        while(pi+1<pat.size() && pat[pi+1]=='*') ++pi;
+        ++pi;
+        if(pi<pat.size() && pat[pi]=='/') {
+          ++pi;
+          if(oec_git_glob_rec(pat,pi,text,ti)) return true;
+          for(size_t k=ti;k<text.size();++k) if(text[k]=='/' && oec_git_glob_rec(pat,pi,text,k+1)) return true;
+          return false;
+        }
+        for(size_t k=ti;k<=text.size();++k) if(oec_git_glob_rec(pat,pi,text,k)) return true;
+        return false;
+      }
+      ++pi;
+      for(size_t k=ti;;++k) {
+        if(oec_git_glob_rec(pat,pi,text,k)) return true;
+        if(k>=text.size() || text[k]=='/') break;
+      }
+      return false;
+    }
+    if(ti>=text.size()) return false;
+    if(pat[pi]=='?') { if(text[ti]=='/') return false; ++pi;++ti; continue; }
+    if(pat[pi]=='[') {
+      if(text[ti]=='/') return false; size_t q=pi; if(!oec_glob_class_match(pat,q,text[ti])) return false; pi=q;++ti;continue;
+    }
+    char pc=pat[pi++]; if(pc=='\\' && pi<pat.size()) pc=pat[pi++];
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+    char tc=text[ti++]; if(pc>='A'&&pc<='Z')pc=(char)(pc-'A'+'a'); if(tc>='A'&&tc<='Z')tc=(char)(tc-'A'+'a'); if(pc!=tc)return false;
+#else
+    if(pc!=text[ti++]) return false;
+#endif
+  }
+  return ti==text.size();
+}
+
+inline bool oec_git_glob_match(const std::string& pat,const std::string& text) { return oec_git_glob_rec(pat,0,text,0); }
+
+inline bool oec_ignore_rule_matches(const OecIgnoreRule& r,const std::string& rel,bool is_dir) {
+  if(r.dir_only && !is_dir) return false;
+  if(r.has_slash || r.anchored) return oec_git_glob_match(r.pattern,rel);
+  size_t start=0;
+  for(;;) {
+    size_t slash=rel.find('/',start); std::string comp=rel.substr(start,slash==std::string::npos?std::string::npos:slash-start);
+    if(oec_git_glob_match(r.pattern,comp)) return true;
+    if(slash==std::string::npos) break; start=slash+1;
+  }
+  return false;
+}
+
+inline bool oec_ignore_eval_one(const std::vector<OecIgnoreRule>& rules,const std::string& rel,bool is_dir) {
+  bool ignored=false;
+  for(size_t i=0;i<rules.size();++i) if(oec_ignore_rule_matches(rules[i],rel,is_dir)) ignored=!rules[i].negated;
+  return ignored;
+}
+
+inline bool oec_ignore_path(const std::vector<OecIgnoreRule>& rules,const std::string& rel,bool is_dir) {
+  std::string p=oec_norm_relpath(rel);
+  size_t pos=0;
+  while(true) {
+    size_t slash=p.find('/',pos); if(slash==std::string::npos) break;
+    const std::string dir=p.substr(0,slash);
+    if(oec_ignore_eval_one(rules,dir,true)) return true;
+    pos=slash+1;
+  }
+  return oec_ignore_eval_one(rules,p,is_dir);
+}
+
+inline std::vector<std::string> oec_add_source_args(const std::vector<std::string>& args) {
+  std::vector<std::string> roots;
+  const char* value_opts[]={"-key","-franzen","-method","-threads","-to","-not","-only","-since","-until","-version","-index","-exclude","-include","-minsize","-maxsize"};
+  for(size_t i=0;i<args.size();++i) {
+    bool value=false; if(i) for(size_t j=0;j<sizeof(value_opts)/sizeof(value_opts[0]);++j) if(args[i-1]==value_opts[j]){value=true;break;}
+    if(value||args[i].empty()||args[i][0]=='-') continue;
+    if(oec_path_kind(args[i])!=0) roots.push_back(args[i]);
+  }
+  return roots;
+}
+
+inline std::string oec_native_source_path(const std::string& root,const std::string& rel) {
+  std::string p=rel.empty()?root:oec_path_join(root,rel); for(size_t i=0;i<p.size();++i)if(p[i]=='\\')p[i]='/'; return p;
+}
+
+inline bool oec_scan_ignore_root(const std::string& root,const std::string& rel,const std::vector<OecIgnoreRule>& rules,OecIgnorePlan& plan,std::string& err) {
+  const std::string here=rel.empty()?root:oec_path_join(root,rel);
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+  std::string pat=oec_path_join(here,"*"); struct _finddata_t fd; intptr_t h=_findfirst(pat.c_str(),&fd);
+  if(h==-1){err="cannot enumerate source directory for ignore filtering: "+here;return false;}
+  do { std::string n=fd.name;if(n=="."||n=="..")continue;std::string r=rel.empty()?n:oec_path_join(rel,n),full=oec_path_join(root,r);bool dir=(fd.attrib&_A_SUBDIR)!=0;
+    if(dir){ if(oec_ignore_path(rules,oec_norm_relpath(r),true)){plan.native_excludes.push_back(oec_native_source_path(root,r));++plan.ignored_dirs;} else if(!oec_scan_ignore_root(root,r,rules,plan,err)){_findclose(h);return false;} }
+    else {++plan.scanned_files;if(oec_ignore_path(rules,oec_norm_relpath(r),false)){plan.native_excludes.push_back(oec_native_source_path(root,r));++plan.ignored_files;} else {OecIgnoreFile f;f.source_root=root;f.rel=oec_norm_relpath(r);f.full=full;plan.allowed_files.push_back(f);}}
+  }while(_findnext(h,&fd)==0);_findclose(h);return true;
+#else
+  DIR* d=opendir(here.c_str());if(!d){err="cannot enumerate source directory for ignore filtering: "+here;return false;}struct dirent* de;
+  while((de=readdir(d))!=0){std::string n=de->d_name;if(n=="."||n=="..")continue;std::string r=rel.empty()?n:oec_path_join(rel,n),full=oec_path_join(root,r);int kind=oec_path_kind(full);
+    if(kind==2){if(oec_ignore_path(rules,oec_norm_relpath(r),true)){plan.native_excludes.push_back(oec_native_source_path(root,r));++plan.ignored_dirs;}else if(!oec_scan_ignore_root(root,r,rules,plan,err)){closedir(d);return false;}}
+    else if(kind==1){++plan.scanned_files;if(oec_ignore_path(rules,oec_norm_relpath(r),false)){plan.native_excludes.push_back(oec_native_source_path(root,r));++plan.ignored_files;}else{OecIgnoreFile f;f.source_root=root;f.rel=oec_norm_relpath(r);f.full=full;plan.allowed_files.push_back(f);}}
+  }closedir(d);return true;
+#endif
+}
+
+inline bool oec_prepare_ignore_plan(const std::vector<std::string>& add_args,bool use_gitignore,OecIgnorePlan& plan,std::string& err) {
+  plan=OecIgnorePlan();plan.gitignore_enabled=use_gitignore;
+  const std::vector<std::string> roots=oec_add_source_args(add_args);
+  struct RootRules{std::string root;int kind;std::vector<OecIgnoreRule> rules;}; std::vector<RootRules> rr;
+  bool any=false;
+  for(size_t i=0;i<roots.size();++i){RootRules x;x.root=roots[i];x.kind=oec_path_kind(x.root);std::string dir=x.kind==2?x.root:oec_dirname(x.root);
+    if(use_gitignore){std::string g=oec_path_join(dir,".gitignore");if(path_exists(g)){if(!oec_parse_ignore_file(g,x.rules,err))return false;plan.rule_files.push_back(g);any=true;}}
+    std::string z=oec_path_join(dir,"zpaq.ignore");if(path_exists(z)){if(!oec_parse_ignore_file(z,x.rules,err))return false;plan.rule_files.push_back(z);any=true;}
+    rr.push_back(x);
+  }
+  if(!any) return true;
+  plan.active=true;
+  for(size_t i=0;i<rr.size();++i){
+    if(rr[i].kind==2){if(!oec_scan_ignore_root(rr[i].root,"",rr[i].rules,plan,err))return false;}
+    else if(rr[i].kind==1){std::string name=oec_basename(rr[i].root);++plan.scanned_files;if(oec_ignore_path(rr[i].rules,name,false)){plan.native_excludes.push_back(oec_native_source_path(rr[i].root,""));++plan.ignored_files;}else{OecIgnoreFile f;f.source_root=rr[i].root;f.rel=name;f.full=rr[i].root;plan.allowed_files.push_back(f);}}
+  }
+  std::sort(plan.native_excludes.begin(),plan.native_excludes.end());plan.native_excludes.erase(std::unique(plan.native_excludes.begin(),plan.native_excludes.end()),plan.native_excludes.end());
+  return true;
+}
+
+inline std::string oec_ignore_temp_path() {
+  const char* d=std::getenv("TMPDIR");
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+  if(!d||!*d)d=std::getenv("TEMP");if(!d||!*d)d=std::getenv("TMP");
+#endif
+  std::string dir=(d&&*d)?d:".";
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+  unsigned long pid=(unsigned long)_getpid();
+#else
+  unsigned long pid=(unsigned long)getpid();
+#endif
+  std::ostringstream o;o<<"zpaqoec-ignore-"<<pid<<"-"<<(unsigned long long)std::time(0)<<".txt";return oec_path_join(dir,o.str());
+}
+
+inline bool oec_write_ignore_exclude_file(const OecIgnorePlan& plan,std::string& path,std::string& err) {
+  path.clear();if(!plan.active||plan.native_excludes.empty())return true;path=oec_ignore_temp_path();FILE* f=std::fopen(path.c_str(),"wb");if(!f){err="cannot create temporary native exclude list: "+path;return false;}
+  for(size_t i=0;i<plan.native_excludes.size();++i)if(std::fprintf(f,"%s\n",plan.native_excludes[i].c_str())<0){std::fclose(f);std::remove(path.c_str());err="cannot write temporary native exclude list: "+path;return false;}
+  if(std::fclose(f)!=0){std::remove(path.c_str());err="cannot close temporary native exclude list: "+path;return false;}return true;
+}
+
+inline int oec_path_kind(const std::string& p, uint64_t* size) {
 #if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
   struct _stat64 st; if(_stat64(p.c_str(),&st)!=0) return 0; if(size)*size=(uint64_t)st.st_size; return (st.st_mode&_S_IFDIR)?2:1;
 #else
@@ -948,8 +1206,10 @@ inline void oec_add_md5_key(std::map<std::string,std::string>& m,const std::stri
   if(it==m.end())m[k]=md5; else if(it->second!=md5)it->second.clear();
 }
 
-inline bool oec_collect_source_md5(const std::vector<std::string>& args,std::map<std::string,std::string>& hashes,std::string& err){
-  hashes.clear(); std::set<std::string> roots;
+inline bool oec_collect_source_md5(const std::vector<std::string>& args,std::map<std::string,std::string>& hashes,std::string& err,const OecIgnorePlan* ignore_plan=0){
+  hashes.clear();
+  if(ignore_plan && ignore_plan->active){uint64_t count=0;for(size_t j=0;j<ignore_plan->allowed_files.size();++j){const OecIgnoreFile& f=ignore_plan->allowed_files[j];std::string md5;if(!oecmd5::file(f.full,md5,err))return false;++count;const std::string rb=oec_basename(f.source_root);oec_add_md5_key(hashes,f.rel,md5);oec_add_md5_key(hashes,oec_path_join(rb,f.rel),md5);oec_add_md5_key(hashes,f.full,md5);if((count%250)==0){std::fprintf(stdout,"oec json: source MD5 progress %llu files\n",(unsigned long long)count);std::fflush(stdout);}}std::fprintf(stdout,"oec json: source MD5 collected for %llu non-ignored files\n",(unsigned long long)count);return true;}
+  std::set<std::string> roots;
   const char* value_opts[]={"-key","-franzen","-method","-threads","-to","-not","-only","-since","-until","-version","-index"};
   for(size_t i=0;i<args.size();++i){ bool skip=false; if(i){ for(size_t j=0;j<sizeof(value_opts)/sizeof(value_opts[0]);++j) if(args[i-1]==value_opts[j]){skip=true;break;} } if(skip||args[i].empty()||args[i][0]=='-')continue; if(oec_path_kind(args[i])!=0)roots.insert(args[i]); }
   uint64_t count=0;
@@ -1334,13 +1594,13 @@ inline int oec_json_command(int argc, const char* const* argv) {
 }
 
 inline bool oec_progressive_json_after_add(const std::string& exe,const std::string& archive_spec,const std::string& index,
-                                           const std::vector<std::string>& add_args,bool force_create,std::string& err){
+                                           const std::vector<std::string>& add_args,bool force_create,std::string& err,const OecIgnorePlan* ignore_plan){
   const std::string json=oec_json_output_path(archive_spec);
   const bool existed=path_exists(json);
   if(!existed && !force_create) return true;
   std::fprintf(stdout,"oec_a: progressive JSON %s %s\n",existed?"update":"create",json.c_str()); std::fflush(stdout);
   std::map<std::string,std::string> source_hashes;
-  if(!oec_collect_source_md5(add_args,source_hashes,err)) return false;
+  if(!oec_collect_source_md5(add_args,source_hashes,err,ignore_plan)) return false;
   std::vector<std::string> auth=oec_extract_auth_args(add_args), a; a.push_back("l");a.push_back(index);a.push_back("-terse");a.push_back("-nocolor");a.insert(a.end(),auth.begin(),auth.end());
   std::string listing,caperr; int rc=spawn_self_capture(exe,a,listing,caperr,"oec_a JSON metadata refresh");
   if(rc!=0){std::ostringstream e;e<<"native l for JSON refresh failed rc="<<rc; if(!caperr.empty())e<<" ("<<caperr<<")";err=e.str();return false;}
@@ -1549,7 +1809,7 @@ inline void oec_quick_help(const char* exe) {
     "\n"
     "OEC commands:\n"
     "  oecinit | oec_init ARCHIVE     initialize/retrofit single or multipart .000 + EC\n"
-    "  oec_a BASE SOURCE...            optimized add + EC; updates existing JSON MD5 catalog\n"
+    "  oec_a BASE SOURCE...            optimized add + EC; zpaq.ignore recursive filtering; -gitignore adds .gitignore\n"
     "  oec_l ARCHIVE [options...]      optimized list; metadata from .000 only\n"
     "  oec_i ARCHIVE [options...]      optimized info/versions; metadata from .000 only\n"
     "  oec_x ARCHIVE [files/options]   OEC equivalent of native x\n"

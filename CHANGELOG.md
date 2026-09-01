@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.8 - gitignore-style source filtering for `oec_a`
+
+- `oec_a` automatically loads `zpaq.ignore` from each source folder when present.
+- Added `-gitignore` / `--gitignore` to also load the source folder's `.gitignore`.
+- Rules are evaluated recursively with Git-style `*`, `?`, `**`, character classes, `/` anchoring, trailing `/` directory rules, comments, escapes, and `!` negation.
+- When both files exist, `.gitignore` is evaluated first and `zpaq.ignore` second so OEC-specific rules can override project rules.
+- OEC resolves the final ignored paths and writes a temporary zpaqfranz `-exclude` list, preserving native add/dedup behavior without passing OEC-only switches upstream.
+- Progressive JSON source-side MD5 collection uses the same filtered file set, so ignored content is neither archived nor hashed into the JSON refresh.
+- Temporary exclusion lists are deleted immediately after the native add child returns.
+- Added recursive filtering, negation, root anchoring, `**`, directory exclusion, `.gitignore` opt-in, precedence, and cleanup regression tests.
+
 ## 0.3.7 - MinGW/UCRT Windows directory enumeration fix
 
 - Fixes Windows compilation of `oec_json --force-md5` and progressive JSON/MD5 helpers under current MSYS2 UCRT64.
