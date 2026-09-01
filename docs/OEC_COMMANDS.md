@@ -1,4 +1,4 @@
-# zpaqoec OEC command guide — 0.3.6
+# zpaqoec OEC command guide — 0.3.7
 
 OEC means **Optimize + Error Correction**. Original zpaqfranz commands remain available unchanged; use the `oec_*` namespace for the fork's optimized/error-corrected workflow.
 
@@ -32,7 +32,7 @@ zpaqoec oec_version
 Expected identity:
 
 ```text
-zpaqoec OEC overlay 0.3.6 (Optimize + Error Correction)
+zpaqoec OEC overlay 0.3.7 (Optimize + Error Correction)
 ```
 
 ## `oecinit` / `oec_init`
@@ -243,7 +243,7 @@ zpaqoec oec_a compress /data -method 5
 zpaqoec oec_a compress /data -method 5 --json-force
 ```
 
-**0.3.6 boundary:** native zpaqfranz still reconstructs Jidac/fragment/file state for dedup. `.idx` does not yet replace that RAM state.
+**0.3.7 boundary:** native zpaqfranz still reconstructs Jidac/fragment/file state for dedup. `.idx` does not yet replace that RAM state.
 
 ## `oec_json` / `oec_j`
 
@@ -307,7 +307,7 @@ Supported `oec_json` options:
 -key PASSWORD / -franzen PASSWORD
 ```
 
-When a valid `.idx` exists and its list view is parseable, `oec_json` reads it through mmap. Otherwise it performs one native terse list pass against `.000`. Starting in 0.3.6, if that terse layout is not parseable, OEC retries `l -all -terse -nocolor` and collapses the explicit version/status history to the current live set. The parser also accepts pipe-status and plain/legacy layouts, compact/slash timestamps, and strips ANSI escape sequences. `PASSWORD_FOLDER` and `FRANZKEY` work as with the other OEC commands, including the extraction pass used by `--force-md5`.
+When a valid `.idx` exists and its list view is parseable, `oec_json` reads it through mmap. Otherwise it performs one native terse list pass against `.000`. Starting in 0.3.7, if that terse layout is not parseable, OEC retries `l -all -terse -nocolor` and collapses the explicit version/status history to the current live set. The parser also accepts pipe-status and plain/legacy layouts, compact/slash timestamps, and strips ANSI escape sequences. `PASSWORD_FOLDER` and `FRANZKEY` work as with the other OEC commands, including the extraction pass used by `--force-md5`.
 
 ## `oec_l`
 
@@ -361,7 +361,7 @@ zpaqoec oec_x compress path/to/file -to restore \
   --idx X:/FastCache/compress.idx
 ```
 
-The cache is validated as OEC metadata acceleration state. Actual payload still comes from multipart data through the native extractor because `.000` contains no D blocks. 0.3.6 does not yet claim direct fragment-to-part seeking.
+The cache is validated as OEC metadata acceleration state. Actual payload still comes from multipart data through the native extractor because `.000` contains no D blocks. 0.3.7 does not yet claim direct fragment-to-part seeking.
 
 ## `oec_e`
 

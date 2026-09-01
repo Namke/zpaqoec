@@ -15,6 +15,11 @@
 #include <algorithm>
 
 #if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+  // Windows CRT directory/file APIs used by OEC source walking and temp cleanup.
+  // MinGW UCRT does not guarantee that zpaqfranz upstream includes these before
+  // this extension, so include them explicitly here.
+  #include <io.h>
+  #include <sys/stat.h>
   #include <process.h>
   #include <direct.h>
 #else
@@ -27,7 +32,7 @@
 namespace zfext {
 
 static const int kNotHandled = -777777;
-static const char* const kOecOverlayVersion = "0.3.6";
+static const char* const kOecOverlayVersion = "0.3.7";
 
 inline std::string zero_suffix(uint64_t n, uint32_t digits) {
   std::ostringstream s; s << std::setw(static_cast<int>(digits)) << std::setfill('0') << n; return s.str();
@@ -925,11 +930,11 @@ inline int oec_path_kind(const std::string& p, uint64_t* size=0) {
 inline bool oec_walk_files(const std::string& root,const std::string& rel,std::vector<std::pair<std::string,std::string> >& out,std::string& err){
   const std::string here=rel.empty()?root:oec_path_join(root,rel);
 #if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
-  std::string pat=oec_path_join(here,"*"); struct _finddata64_t fd; intptr_t h=_findfirst64(pat.c_str(),&fd);
+  std::string pat=oec_path_join(here,"*"); struct _finddata_t fd; intptr_t h=_findfirst(pat.c_str(),&fd);
   if(h==-1){err="cannot enumerate source directory: "+here;return false;}
   do { std::string n=fd.name; if(n=="."||n=="..")continue; std::string r=rel.empty()?n:oec_path_join(rel,n); std::string full=oec_path_join(root,r);
        if(fd.attrib&_A_SUBDIR){ if(!oec_walk_files(root,r,out,err)){_findclose(h);return false;} } else out.push_back(std::make_pair(oec_norm_relpath(r),full));
-  } while(_findnext64(h,&fd)==0); _findclose(h); return true;
+  } while(_findnext(h,&fd)==0); _findclose(h); return true;
 #else
   DIR* d=opendir(here.c_str()); if(!d){err="cannot enumerate source directory: "+here;return false;} struct dirent* de;
   while((de=readdir(d))!=0){ std::string n=de->d_name; if(n=="."||n=="..")continue; std::string r=rel.empty()?n:oec_path_join(rel,n), full=oec_path_join(root,r); int k=oec_path_kind(full);
@@ -1205,7 +1210,7 @@ inline bool oec_write_json_catalog(const std::string& output_path, const std::st
 
 inline bool oec_remove_tree(const std::string& root){
 #if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
-  std::string pat=oec_path_join(root,"*"); struct _finddata64_t fd; intptr_t h=_findfirst64(pat.c_str(),&fd); if(h!=-1){do{std::string n=fd.name;if(n=="."||n=="..")continue;std::string p=oec_path_join(root,n);if(fd.attrib&_A_SUBDIR)oec_remove_tree(p);else std::remove(p.c_str());}while(_findnext64(h,&fd)==0);_findclose(h);} return _rmdir(root.c_str())==0;
+  std::string pat=oec_path_join(root,"*"); struct _finddata_t fd; intptr_t h=_findfirst(pat.c_str(),&fd); if(h!=-1){do{std::string n=fd.name;if(n=="."||n=="..")continue;std::string p=oec_path_join(root,n);if(fd.attrib&_A_SUBDIR)oec_remove_tree(p);else std::remove(p.c_str());}while(_findnext(h,&fd)==0);_findclose(h);} return _rmdir(root.c_str())==0;
 #else
   DIR* d=opendir(root.c_str()); if(d){struct dirent* de;while((de=readdir(d))!=0){std::string n=de->d_name;if(n=="."||n=="..")continue;std::string p=oec_path_join(root,n);if(oec_path_kind(p)==2)oec_remove_tree(p);else std::remove(p.c_str());}closedir(d);} return rmdir(root.c_str())==0;
 #endif

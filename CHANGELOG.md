@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.7 - MinGW/UCRT Windows directory enumeration fix
+
+- Fixes Windows compilation of `oec_json --force-md5` and progressive JSON/MD5 helpers under current MSYS2 UCRT64.
+- Explicitly includes `<io.h>` and `<sys/stat.h>` for `_findfirst`, `_findnext`, `_finddata_t`, `_stat64`, and related CRT definitions.
+- Replaces the non-portable `_finddata64_t`/`_findfirst64` spelling with `_finddata_t`/`_findfirst`; OEC only needs `name` and `attrib` during traversal, so a 64-bit enumeration size field is unnecessary.
+- Adds a Windows static regression gate for the exact incomplete-type failure.
+
 ## 0.3.6 - resilient zpaqfranz list parser for JSON catalogs
 
 - Fixes `oec_json: could not parse file records` on real zpaqfranz 64.8 list layouts that differ from the original fake-harness format.

@@ -1,4 +1,8 @@
-## 0.3.6 - progressive JSON MD5
+## 0.3.7 - Windows CRT directory enumeration
+
+Fixed current MSYS2 UCRT64 compilation for JSON/MD5 filesystem walking. OEC now explicitly includes the Windows CRT I/O/stat headers and uses `_finddata_t` with `_findfirst/_findnext`, because the helpers only consume directory-entry names and attributes; actual file sizes remain 64-bit through `_stat64`/MD5 file I/O. Added a static regression for the exact incomplete `_finddata64_t` failure.
+
+## 0.3.7 - progressive JSON MD5
 
 Implemented force-extract MD5 catalogs and source-side progressive MD5 refresh on `oec_a`, with atomic JSON replacement and force-create gating.
 
