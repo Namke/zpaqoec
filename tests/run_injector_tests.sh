@@ -17,9 +17,12 @@ grep -q 'ZPAQFRANZ_OEC_DISPATCH' "$TMP/fake.cpp"
 python3 "$ROOT/scripts/apply_to_upstream.py" "$TMP/fake.cpp" | grep -q 'already patched'
 count=$(grep -c '^#include "extensions/zpaqfranz_ext.hpp"$' "$TMP/fake.cpp")
 inc=$(grep -n -m1 '^#include "extensions/zpaqfranz_ext.hpp"$' "$TMP/fake.cpp" | cut -d: -f1)
-main=$(grep -n -m1 -E '\bint[[:space:]]+main[[:space:]]*\(' "$TMP/fake.cpp" | cut -d: -f1)
+entry=$(grep -n -m1 -E '\bint[[:space:]]+zpaq_main_internal[[:space:]]*\(' "$TMP/fake.cpp" | cut -d: -f1)
 [[ "$count" -eq 1 ]]
-[[ "$inc" -lt "$main" ]]
+[[ "$inc" -lt "$entry" ]]
 [[ "$inc" -gt 1 ]]
+# The dispatcher must be inside the common internal entry, not the decoy/outer main.
+hook=$(grep -n -m1 'ZPAQFRANZ_OEC_DISPATCH' "$TMP/fake.cpp" | cut -d: -f1)
+[[ "$hook" -gt "$entry" ]]
 g++ -std=c++11 -O2 "$TMP/fake.cpp" -o "$TMP/zpaqfranz"
 echo "INJECTOR TESTS PASS"

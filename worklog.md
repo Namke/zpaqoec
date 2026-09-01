@@ -17,3 +17,12 @@
 - Implement disk-backed/mmap `.idx` cache with explicit path selection and generation fingerprinting against `000`.
 - Integrate `.idx` lookup into every profitable `oec_*` command, starting with metadata lookup and then dedup/add hot paths.
 - Hook EC generation into the ordered ZPAQ output writer to remove the post-close reread for newly created parts.
+
+## 0.2.1 - Windows common-entry dispatcher + OEC help
+
+- Reproduced the architectural flaw in the 0.2.0 injector: it selected the first textual `int main(...)`, which is unsafe in zpaqfranz's platform-conditional monolith.
+- Moved OEC dispatch to `zpaq_main_internal(int, const char**)`, confirmed present in upstream Windows diagnostics and used as the common command path.
+- Added automatic migration/removal of legacy hook blocks and kept include placement after upstream platform compatibility setup.
+- Added `oec_init` alias, no-argument OEC help, `oec_help`, and `oec_h`.
+- Added `docs/OEC_COMMANDS.md`.
+- Tests: injector PASS, EC PASS, OEC_A PASS, OECINIT PASS, OEC COMMAND PASS.

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1
+
+- Fixed Windows OEC command dispatch by moving the injected hook from the first textual `main()` to upstream `zpaq_main_internal()`, the common command entry used by the monolithic source.
+- Injector migrates existing 0.1.x/0.2.0 hook placements automatically and remains idempotent.
+- Added `oec_init` as an alias of `oecinit`.
+- Running `zpaqoec` with no parameters now prints OEC quick help instead of immediately falling through to upstream help.
+- Added `oec_help` / `oec_h` explicit quick-help commands.
+- Added `docs/OEC_COMMANDS.md` with Windows/Linux usage and OEC command behavior.
+- Regression harness now contains a decoy/conditional `main()` and verifies dispatch is inserted into `zpaq_main_internal()`.
+- `.idx` remains planned, not implemented; OEC routing stays cache-ready.
+
 ## 0.2.0 - OEC namespace milestone
 
 - Established **OEC = Optimize + Error Correction** as the fork's primary target/identity.

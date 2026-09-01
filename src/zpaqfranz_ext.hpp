@@ -115,7 +115,7 @@ inline void oec_a_usage() {
     "  oec_a BASE <zpaq add source/options...> [--ec-data N] [--ec-shard BYTES]\n"
     "           [--ec-stripes N] [--digits N] [--no-index-ec] [--no-part-ec]\n\n"
     "Example:\n"
-    "  zpaqfranz oec_a compress /data -method 5\n\n"
+    "  zpaqoec oec_a compress /data -method 5\n\n"
     "Creates/updates compress.000 and one new compress.NNN, then writes\n"
     "compress.NNN.ec (and compress.000.ec unless --no-index-ec).\n");
 }
@@ -205,9 +205,9 @@ inline void oecinit_usage() {
     "            [--ec-data N] [--ec-shard BYTES] [--ec-stripes N]\n"
     "            [--no-index-ec] [--no-part-ec] [zpaq read options...]\n\n"
     "Examples:\n"
-    "  zpaqfranz oecinit \"compress.???\"\n"
-    "  zpaqfranz oecinit \"backup_????????.zpaq\" -index backup_00000000.zpaq\n"
-    "  zpaqfranz oecinit \"secret.???\" -key PASSWORD\n\n"
+    "  zpaqoec oecinit \"compress.???\"\n"
+    "  zpaqoec oecinit \"backup_????????.zpaq\" -index backup_00000000.zpaq\n"
+    "  zpaqoec oecinit \"secret.???\" -key PASSWORD\n\n"
     "The index path defaults to the archive pattern with ? replaced by 0.\n"
     "Index generation uses the native ZPAQ extract -index path, so archive parts\n"
     "are never rewritten. EC sidecars are generated independently for every part.\n");
@@ -381,8 +381,8 @@ inline void oec_read_usage(const char* cmd) {
     "OEC optimized %s:\n"
     "  %s ARCHIVE [native options/files...] [--digits N] [--oec-index PATH]\n\n"
     "Examples:\n"
-    "  zpaqfranz %s compress -all\n"
-    "  zpaqfranz %s \"backup_????????.zpaq\"\n\n"
+    "  zpaqoec %s compress -all\n"
+    "  zpaqoec %s \"backup_????????.zpaq\"\n\n"
     "%s\n",
     metadata ? "metadata command" : "extract command", cmd, cmd, cmd,
     metadata
@@ -464,12 +464,39 @@ inline int oec_i(int argc, const char* const* argv) { return oec_read_command(ar
 inline int oec_x(int argc, const char* const* argv) { return oec_read_command(argc, argv, "oec_x", "x", false); }
 inline int oec_e(int argc, const char* const* argv) { return oec_read_command(argc, argv, "oec_e", "e", false); }
 
+inline void oec_quick_help(const char* exe) {
+  const char* p = (exe && *exe) ? exe : "zpaqoec";
+  std::fprintf(stdout,
+    "zpaqoec - OEC (Optimize + Error Correction) for zpaqfranz\n"
+    "\n"
+    "OEC commands:\n"
+    "  oecinit | oec_init ARCHIVE     initialize/retrofit .000 index + EC sidecars\n"
+    "  oec_a BASE SOURCE...            optimized incremental add using .000 + EC\n"
+    "  oec_l ARCHIVE [options...]      optimized list; metadata from .000 only\n"
+    "  oec_i ARCHIVE [options...]      optimized info/versions; metadata from .000 only\n"
+    "  oec_x ARCHIVE [files/options]   OEC equivalent of native x\n"
+    "  oec_e ARCHIVE [files/options]   OEC equivalent of native e\n"
+    "  ec create|verify|repair|info    independent EC sidecar operations\n"
+    "\n"
+    "Examples:\n"
+    "  %s oecinit \"backup.???\"\n"
+    "  %s oec_a backup /data -method 5\n"
+    "  %s oec_l backup -all\n"
+    "  %s oec_x backup path/to/file -to restore\n"
+    "\n"
+    "Original zpaqfranz commands remain available unchanged (a, l, i, x, e, ...).\n"
+    "Use '%s h h' for full upstream help. See docs/OEC_COMMANDS.md for OEC details.\n",
+    p, p, p, p, p);
+}
+
 inline int dispatch_const(int argc, const char* const* argv) {
-  if (argc < 2 || !argv || !argv[1]) return kNotHandled;
+  if (!argv) return kNotHandled;
+  if (argc < 2 || !argv[1]) { oec_quick_help(argc > 0 ? argv[0] : 0); return 0; }
   const std::string cmd=argv[1];
+  if (cmd=="oec_help" || cmd=="oec_h") { oec_quick_help(argv[0]); return 0; }
   if (cmd=="ec") return zfec::cli(argc-1, argv+1);
   if (cmd=="oec_a") return oec_a(argc, argv);
-  if (cmd=="oecinit") return oecinit(argc, argv);
+  if (cmd=="oecinit" || cmd=="oec_init") return oecinit(argc, argv);
   if (cmd=="oec_l") return oec_l(argc, argv);
   if (cmd=="oec_i") return oec_i(argc, argv);
   if (cmd=="oec_x") return oec_x(argc, argv);

@@ -7,6 +7,11 @@ cp "$ROOT/tests/fake_upstream.cpp" "$TMP/fake.cpp"
 python3 "$ROOT/scripts/apply_to_upstream.py" "$TMP/fake.cpp" --extension-dir "$TMP/extensions" >/dev/null
 g++ -std=c++11 -O2 "$TMP/fake.cpp" -o "$TMP/zpaqfranz"
 cd "$TMP"
+# No-argument executable must show OEC quick help instead of falling through to upstream help.
+./zpaqfranz > noargs.txt
+grep -Fq 'OEC (Optimize + Error Correction)' noargs.txt
+grep -Fq 'oecinit | oec_init' noargs.txt
+# Both init spellings are accepted.
 # Build two OEC parts using the new public command.
 ./zpaqfranz oec_a compress dummy-source --ec-data 16 --ec-stripes 8 >/dev/null
 ./zpaqfranz oec_a compress dummy-source --ec-data 16 --ec-stripes 8 >/dev/null
@@ -27,7 +32,7 @@ grep -Fxq 'e|compress.???|file.txt' native_calls.log
 # Generic pattern/index inference.
 rm -f legacy_*.zpaq legacy_*.zpaq.ec
 for n in 1 2; do cp compress.001 "$(printf 'legacy_%04d.zpaq' "$n")"; done
-./zpaqfranz oecinit 'legacy_????.zpaq' --ec-data 16 --ec-stripes 8 >/dev/null
+./zpaqfranz oec_init 'legacy_????.zpaq' --ec-data 16 --ec-stripes 8 >/dev/null
 : > native_calls.log
 ./zpaqfranz oec_l 'legacy_????.zpaq' >/dev/null
 ./zpaqfranz oec_x 'legacy_????.zpaq' foo >/dev/null

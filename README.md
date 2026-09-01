@@ -1,4 +1,4 @@
-# zpaqoec 0.2.0
+# zpaqoec 0.2.1
 
 **OEC = Optimize + Error Correction.**
 
@@ -22,13 +22,15 @@ compress.002.ec
 ...
 compress.ecstate      tiny OEC part-number checkpoint
 
-# planned / not in 0.2.0
+# planned / not in 0.2.1
 X:/fast-cache/compress.idx   disposable SSD/NVMe disk-backed acceleration cache
 ```
 
 `compress.001`, `.002`, ... are not modified by OEC. The `.ec` files are external to ZPAQ format.
 
 ## Public OEC commands
+
+Run `zpaqoec` with no parameters to print OEC quick help. A detailed command guide is in [`docs/OEC_COMMANDS.md`](docs/OEC_COMMANDS.md). `oec_init` is accepted as an alias of `oecinit`.
 
 | Command | Purpose | Current read source |
 |---|---|---|
@@ -48,7 +50,7 @@ The zero part is a standard ZPAQ index containing the archive metadata but no co
 
 ### Why `oec_x` / `oec_e` still address the data parts
 
-A ZPAQ index deliberately omits D blocks, so it cannot itself extract file contents. In 0.2.0 `oec_x`/`oec_e` normalize the OEC archive layout but still call the native extraction command on the multipart pattern. When `.idx` is added, these commands will use it for fast file/fragment/part lookup and then open only required data parts where the upstream integration permits it.
+A ZPAQ index deliberately omits D blocks, so it cannot itself extract file contents. In 0.2.1 `oec_x`/`oec_e` normalize the OEC archive layout but still call the native extraction command on the multipart pattern. When `.idx` is added, these commands will use it for fast file/fragment/part lookup and then open only required data parts where the upstream integration permits it.
 
 ## Initialize an existing archive
 
@@ -167,7 +169,7 @@ nominal parity       6.25%
 
 ## `.idx` roadmap contract
 
-`.idx` is **not implemented in 0.2.0**. The OEC command router is centralized so the future cache can be inserted without changing public commands.
+`.idx` is **not implemented in 0.2.1**. The OEC command router is centralized so the future cache can be inserted without changing public commands.
 
 Target behavior:
 
