@@ -1,3 +1,14 @@
+## 0.4.0 - OECIDX2 structured cache + migration manager
+
+- Upgrade new cache builds to `OECIDX2`.
+- Add binary `FILE_TABLE`, shared string pool and sorted `PATH_HASH` sections, while retaining LIST/INFO compatibility views.
+- `oec_json` consumes structured mmap file records directly on IDX2 cache hits.
+- Reader remains backward-compatible with valid `OECIDX1` files.
+- Add `oec_idx upgrade`, `rebuild`, and `ensure`. `upgrade` migrates old valid IDX1 by rebuilding from authoritative `.000`; `ensure` verifies current IDX2 and rebuilds only when missing/stale/corrupt/old.
+- `oec_idx verify` now reports whether a valid cache is current and returns nonzero for old IDX1.
+- IDX2 verification checks header/section CRC32C, zero-part fingerprint, file/string references, path-hash indexes and hash-table ordering.
+- Reserve versioned fragment/block sections for the later deep Jidac/HT dedup backend. They remain empty in 0.4.0; `oec_a` still uses upstream Jidac for dedup correctness.
+
 # Changelog
 
 ## 0.3.8 - gitignore-style source filtering for `oec_a`

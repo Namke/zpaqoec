@@ -24,7 +24,7 @@ assert d['format']=='zpaqoec-file-list'
 assert d['format_version']==2
 assert d['file_count']==2
 assert d['total_size']==1234
-assert d['metadata_source']=='idx-mmap'
+assert d['metadata_source']=='idx2-structured-mmap'
 a=d['files'][0]
 assert a['path']=='folder/file one.txt'
 assert a['size']==1234

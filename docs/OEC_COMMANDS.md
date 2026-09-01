@@ -1,4 +1,4 @@
-# zpaqoec OEC command guide — 0.3.8
+# zpaqoec OEC command guide — 0.4.0
 
 OEC means **Optimize + Error Correction**. Original zpaqfranz commands remain available unchanged; use the `oec_*` namespace for the fork's optimized/error-corrected workflow.
 
@@ -32,7 +32,7 @@ zpaqoec oec_version
 Expected identity:
 
 ```text
-zpaqoec OEC overlay 0.3.8 (Optimize + Error Correction)
+zpaqoec OEC overlay 0.4.0 (Optimize + Error Correction)
 ```
 
 ## `oecinit` / `oec_init`
@@ -149,7 +149,7 @@ Resolution order: explicit `-key`/`-franzen`, existing `FRANZKEY`, matching pass
 Build cache explicitly:
 
 ```bash
-zpaqoec oec_idx build compress --idx X:/FastCache/compress.idx
+zpaqoec oec_idx ensure compress --idx X:/FastCache/compress.idx
 ```
 
 Verify:
@@ -188,6 +188,18 @@ zpaqoec oec_idx build backup \
 ```
 
 See [`OEC_IDX_FORMAT.md`](OEC_IDX_FORMAT.md) for cache layout and validity rules.
+
+
+IDX2 management actions:
+
+```bash
+zpaqoec oec_idx verify  compress --idx X:/FastCache/compress.idx
+zpaqoec oec_idx ensure  compress --idx X:/FastCache/compress.idx
+zpaqoec oec_idx upgrade compress --idx X:/FastCache/compress.idx
+zpaqoec oec_idx rebuild compress --idx X:/FastCache/compress.idx
+```
+
+`ensure` verifies and self-heals missing/stale/corrupt/old caches. `upgrade` migrates valid IDX1 to IDX2 by rebuilding from `.000`. New IDX2 contains structured FILE_TABLE/STRING_POOL/PATH_HASH sections in addition to LIST/INFO compatibility views.
 
 ## `oec_a`
 
@@ -246,7 +258,7 @@ Supported rule features include `*`, `?`, `**`, `[abc]`/ranges, comments beginni
 
 OEC resolves the final ignored file/directory set before the native add and passes a temporary `-exclude` file to zpaqfranz. The temporary file is removed immediately after add. Progressive JSON/MD5 source hashing uses the same filtered set.
 
-Only the ignore file in each explicitly supplied source folder is loaded; patterns from that file filter descendants recursively. OEC does not automatically discover nested `.gitignore`/`zpaq.ignore` files in subdirectories in 0.3.8.
+Only the ignore file in each explicitly supplied source folder is loaded; patterns from that file filter descendants recursively. OEC does not automatically discover nested `.gitignore`/`zpaq.ignore` files in subdirectories in 0.4.0.
 
 Cache path:
 
@@ -280,7 +292,7 @@ zpaqoec oec_a compress /data -method 5
 zpaqoec oec_a compress /data -method 5 --json-force
 ```
 
-**0.3.8 boundary:** native zpaqfranz still reconstructs Jidac/fragment/file state for dedup. `.idx` does not yet replace that RAM state.
+**0.4.0 boundary:** native zpaqfranz still reconstructs Jidac/fragment/file state for dedup. `.idx` does not yet replace that RAM state.
 
 ## `oec_json` / `oec_j`
 
@@ -344,7 +356,7 @@ Supported `oec_json` options:
 -key PASSWORD / -franzen PASSWORD
 ```
 
-When a valid `.idx` exists and its list view is parseable, `oec_json` reads it through mmap. Otherwise it performs one native terse list pass against `.000`. Starting in 0.3.8, if that terse layout is not parseable, OEC retries `l -all -terse -nocolor` and collapses the explicit version/status history to the current live set. The parser also accepts pipe-status and plain/legacy layouts, compact/slash timestamps, and strips ANSI escape sequences. `PASSWORD_FOLDER` and `FRANZKEY` work as with the other OEC commands, including the extraction pass used by `--force-md5`.
+When a valid `.idx` exists and its list view is parseable, `oec_json` reads it through mmap. Otherwise it performs one native terse list pass against `.000`. Starting in 0.4.0, if that terse layout is not parseable, OEC retries `l -all -terse -nocolor` and collapses the explicit version/status history to the current live set. The parser also accepts pipe-status and plain/legacy layouts, compact/slash timestamps, and strips ANSI escape sequences. `PASSWORD_FOLDER` and `FRANZKEY` work as with the other OEC commands, including the extraction pass used by `--force-md5`.
 
 ## `oec_l`
 
@@ -398,7 +410,7 @@ zpaqoec oec_x compress path/to/file -to restore \
   --idx X:/FastCache/compress.idx
 ```
 
-The cache is validated as OEC metadata acceleration state. Actual payload still comes from multipart data through the native extractor because `.000` contains no D blocks. 0.3.8 does not yet claim direct fragment-to-part seeking.
+The cache is validated as OEC metadata acceleration state. Actual payload still comes from multipart data through the native extractor because `.000` contains no D blocks. 0.4.0 does not yet claim direct fragment-to-part seeking.
 
 ## `oec_e`
 

@@ -34,7 +34,7 @@
 namespace zfext {
 
 static const int kNotHandled = -777777;
-static const char* const kOecOverlayVersion = "0.3.8";
+static const char* const kOecOverlayVersion = "0.4.0";
 
 inline std::string zero_suffix(uint64_t n, uint32_t digits) {
   std::ostringstream s; s << std::setw(static_cast<int>(digits)) << std::setfill('0') << n; return s.str();
@@ -412,6 +412,8 @@ inline int spawn_self_capture(const std::string& exe, const std::vector<std::str
 }
 
 
+inline bool oec_build_idx_v2_from_text(const std::string& idx_path,const std::string& index,const std::string& list_text,const std::string& info_text,std::string& err);
+
 inline bool build_idx_cache(const std::string& exe, const std::string& index,
                             const std::string& idx_path, std::string& err,
                             const std::vector<std::string>& auth_args=std::vector<std::string>()) {
@@ -430,7 +432,7 @@ inline bool build_idx_cache(const std::string& exe, const std::string& index,
   if(rc!=0){ std::ostringstream e; e<<"native i failed rc="<<rc; if(!caperr.empty())e<<" ("<<caperr<<")"; err=e.str(); return false; }
   oec_strip_auth_chatter(info_text);
   std::fprintf(stdout,"oec idx: stage 2/2 complete (%llu bytes cached)\n",(unsigned long long)info_text.size()); std::fflush(stdout);
-  if(!oecidx::write_cache(idx_path,index,list_text,info_text,err)) return false;
+  if(!oec_build_idx_v2_from_text(idx_path,index,list_text,info_text,err)) return false;
   return true;
 }
 
@@ -1378,6 +1380,18 @@ inline void oec_collapse_current_records(std::vector<OecJsonFileRecord>& files) 
   std::map<std::string,OecJsonFileRecord> cur; for(size_t i=0;i<files.size();++i){std::string k=oec_norm_relpath(files[i].path);if(k.empty())continue;std::map<std::string,OecJsonFileRecord>::iterator it=cur.find(k);if(it==cur.end()||files[i].version>=it->second.version)cur[k]=files[i];}
   files.clear(); for(std::map<std::string,OecJsonFileRecord>::const_iterator it=cur.begin();it!=cur.end();++it)if(it->second.status!='-')files.push_back(it->second);
 }
+inline bool oec_build_idx_v2_from_text(const std::string& idx_path,const std::string& index,const std::string& list_text,const std::string& info_text,std::string& err) {
+  std::vector<OecJsonFileRecord> parsed; oec_parse_file_list(list_text,parsed);
+  if(!parsed.empty()) oec_collapse_current_records(parsed);
+  std::vector<oecidx::FileInput> files; files.reserve(parsed.size());
+  for(size_t i=0;i<parsed.size();++i){oecidx::FileInput f;f.path=oec_norm_relpath(parsed[i].path);f.modified=parsed[i].modified;f.attributes=parsed[i].attributes;f.size=parsed[i].size;f.version=parsed[i].version;f.ratio_percent=parsed[i].ratio_percent;f.status=parsed[i].status;f.type=parsed[i].type=="directory"?1:0;files.push_back(f);}
+  return oecidx::write_cache_v2(idx_path,index,list_text,info_text,files,err);
+}
+inline void oec_idx_files_to_json(const oecidx::Cache& cache,std::vector<OecJsonFileRecord>& files) {
+  files.clear(); if(!cache.has_files()) return; const oecidx::FileRecord* r=cache.file_records();
+  for(uint64_t i=0;i<cache.file_count();++i){OecJsonFileRecord x;x.path=cache.file_string(r[i].path_offset,r[i].path_size);x.modified=cache.file_string(r[i].modified_offset,r[i].modified_size);x.attributes=cache.file_string(r[i].attributes_offset,r[i].attributes_size);x.size=r[i].size;x.version=r[i].version;x.ratio_percent=r[i].ratio_percent;x.status=(char)r[i].status;x.type=r[i].type?"directory":"file";files.push_back(x);}
+}
+
 inline std::string oec_json_escape(const std::string& s) {
   static const char* hex="0123456789abcdef";
   std::string out; out.reserve(s.size()+16);
@@ -1553,13 +1567,17 @@ inline int oec_json_command(int argc, const char* const* argv) {
   const bool enc_known=oec_file_looks_standard_aes_encrypted(layout.index,encrypted,encerr);
   if(use_idx && (!enc_known || !encrypted || idx_plaintext)) {
     oecidx::Cache cache;
-    if(cache.open(idx_path,layout.index,err) && cache.has_list()) {
-      listing.assign(cache.list_data(),cache.list_size());
-      source_kind="idx-mmap"; got_from_idx=true;
+    if(cache.open(idx_path,layout.index,err)) {
+      if(cache.has_files()) { source_kind="idx2-structured-mmap"; got_from_idx=true; }
+      else if(cache.has_list()) { listing.assign(cache.list_data(),cache.list_size()); source_kind="idx1-mmap"; got_from_idx=true; }
     }
   }
   std::vector<OecJsonFileRecord> files;
-  if(got_from_idx) oec_parse_file_list(listing,files);
+  if(got_from_idx) {
+    oecidx::Cache cache2; std::string e2;
+    if(cache2.open(idx_path,layout.index,e2) && cache2.has_files()) oec_idx_files_to_json(cache2,files);
+    else oec_parse_file_list(listing,files);
+  }
   // Old/current IDX list text may be a human-oriented layout that is not parseable
   // enough for a lossless catalog. Fall back to one native terse pass in that case.
   if(!got_from_idx || files.empty()) {
@@ -1617,7 +1635,7 @@ inline int oec_idx_command(int argc, const char* const* argv) {
   if (argc < 4) {
     std::fprintf(stderr,
       "OEC mmap cache manager:\n"
-      "  oec_idx build|verify|info|drop ARCHIVE [--idx PATH] [--digits N] [--oec-index PATH] [--idx-plaintext]\n"
+      "  oec_idx build|verify|info|ensure|upgrade|rebuild|drop ARCHIVE [--idx PATH] [--digits N] [--oec-index PATH] [--idx-plaintext]\n"
       "Examples:\n"
       "  zpaqoec oec_idx build compress --idx X:/FastCache/compress.idx\n"
       "  zpaqoec oec_idx verify compress --idx X:/FastCache/compress.idx\n");
@@ -1637,14 +1655,19 @@ inline int oec_idx_command(int argc, const char* const* argv) {
   OecReadLayout layout; std::string err;
   if(!resolve_oec_read_layout(spec,digits,index_override,layout,err)){std::fprintf(stderr,"oec_idx: %s\n",err.c_str());return 2;}
   const std::string idx=idx_override.empty()?default_idx_for_layout(spec,layout):idx_override;
-  if(action=="build"){
+  if(action=="build" || action=="rebuild" || action=="upgrade" || action=="ensure"){
+    oecidx::Cache existing; std::string existing_err; const bool existing_ok=existing.open(idx,layout.index,existing_err);
+    if(action=="ensure" && existing_ok && existing.current()){std::fprintf(stdout,"oec_idx: current/valid %s\n%s\n",idx.c_str(),existing.describe().c_str());return 0;}
+    if(action=="upgrade" && existing_ok && existing.current()){std::fprintf(stdout,"oec_idx: already current %s\n%s\n",idx.c_str(),existing.describe().c_str());return 0;}
     bool enc=false; std::string encerr;
     if(oec_file_looks_standard_aes_encrypted(layout.index,enc,encerr) && enc && !idx_plaintext) {
       std::fprintf(stderr,"oec_idx: encrypted zero-part detected; refusing to create plaintext metadata cache without --idx-plaintext\n"); return 3;
     }
-    if(!build_idx_cache(exe,layout.index,idx,err,idx_auth)){std::fprintf(stderr,"oec_idx: build failed: %s\n",err.c_str());return 4;}
-    oecidx::Cache c; if(!c.open(idx,layout.index,err)){std::fprintf(stderr,"oec_idx: post-build verify failed: %s\n",err.c_str());return 4;}
-    std::fprintf(stdout,"oec_idx: built %s\n%s\n",idx.c_str(),oecidx::describe(*c.header()).c_str()); return 0;
+    if(action=="upgrade" && existing_ok) std::fprintf(stdout,"oec_idx: upgrading v%u -> v%u by rebuilding from authoritative zero-part\n",existing.version(),oecidx::kCurrentVersion);
+    else if(action=="ensure" && !existing_ok) std::fprintf(stdout,"oec_idx: cache missing/stale/corrupt/old (%s); rebuilding\n",existing_err.c_str());
+    if(!build_idx_cache(exe,layout.index,idx,err,idx_auth)){std::fprintf(stderr,"oec_idx: %s failed: %s\n",action.c_str(),err.c_str());return 4;}
+    oecidx::Cache c; if(!c.open(idx,layout.index,err)||!c.current()){std::fprintf(stderr,"oec_idx: post-build verify failed: %s\n",err.c_str());return 4;}
+    std::fprintf(stdout,"oec_idx: %s %s\n%s\n",action=="build"?"built":action.c_str(),idx.c_str(),c.describe().c_str()); return 0;
   }
   if(action=="drop"){
     if(!oecidx::remove_cache(idx,err)){std::fprintf(stderr,"oec_idx: %s\n",err.c_str());return 4;}
@@ -1652,8 +1675,8 @@ inline int oec_idx_command(int argc, const char* const* argv) {
   }
   oecidx::Cache c;
   if(!c.open(idx,layout.index,err)){std::fprintf(stderr,"oec_idx: %s: %s\n",action.c_str(),err.c_str());return 3;}
-  if(action=="verify") { std::fprintf(stdout,"oec_idx: OK %s\n%s\n",idx.c_str(),oecidx::describe(*c.header()).c_str()); return 0; }
-  if(action=="info") { std::fprintf(stdout,"idx=%s\nsource=%s\n%s\n",idx.c_str(),layout.index.c_str(),oecidx::describe(*c.header()).c_str()); return 0; }
+  if(action=="verify") { std::fprintf(stdout,"oec_idx: OK %s current=%s\n%s\n",idx.c_str(),c.current()?"yes":"no",c.describe().c_str()); return c.current()?0:5; }
+  if(action=="info") { std::fprintf(stdout,"idx=%s\nsource=%s\n%s\n",idx.c_str(),layout.index.c_str(),c.describe().c_str()); return 0; }
   std::fprintf(stderr,"oec_idx: unknown action %s\n",action.c_str()); return 2;
 }
 
@@ -1814,7 +1837,7 @@ inline void oec_quick_help(const char* exe) {
     "  oec_i ARCHIVE [options...]      optimized info/versions; metadata from .000 only\n"
     "  oec_x ARCHIVE [files/options]   OEC equivalent of native x\n"
     "  oec_e ARCHIVE [files/options]   OEC equivalent of native e\n"
-    "  oec_idx build|verify|info|drop  mmap SSD cache manager\n"
+    "  oec_idx build|verify|info|ensure|upgrade|rebuild|drop  mmap SSD cache manager\n"
     "  oec_json | oec_j ARCHIVE       write JSON catalog; --force-md5 hashes extracted payload\n"
     "  ec create|verify|repair|info    independent EC sidecar operations\n"
     "  oec_version                    show OEC overlay version/build identity\n"

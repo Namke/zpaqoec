@@ -11,7 +11,14 @@ cd "$TMP"
 ./zpaqoec oec_a compress dummy-source --no-idx --ec-data 16 --ec-stripes 8 >/dev/null
 ./zpaqoec oec_idx build compress --idx "$TMP/ssd/compress.idx" >/dev/null
 ./zpaqoec oec_idx verify compress --idx "$TMP/ssd/compress.idx" >/dev/null
-./zpaqoec oec_idx info compress --idx "$TMP/ssd/compress.idx" | grep -Fq 'OECIDX v1'
+./zpaqoec oec_idx info compress --idx "$TMP/ssd/compress.idx" | grep -Fq 'OECIDX v2'
+cat > "$TMP/check_idx2.cpp" <<'CPP'
+#include "extensions/oec_idx.hpp"
+#include <cstdio>
+int main(){std::string e;oecidx::Cache c;if(!c.open("ssd/compress.idx","compress.000",e)){std::fprintf(stderr,"%s\n",e.c_str());return 1;}if(!c.current()||!c.has_files()||c.file_count()!=2)return 2;uint64_t i=999;if(!c.lookup_path("folder/file one.txt",i))return 3;const oecidx::FileRecord&r=c.file_records()[i];if(r.size!=1234)return 4;return 0;}
+CPP
+g++ -std=c++11 -O2 "$TMP/check_idx2.cpp" -o "$TMP/check_idx2"
+./check_idx2
 
 # mmap hit: default metadata reads must not invoke upstream.
 : > native_calls.log
@@ -42,6 +49,29 @@ if ./zpaqoec oec_idx verify compress --idx "$TMP/ssd/compress.idx" >/dev/null 2>
 fi
 ./zpaqoec oec_i compress --idx "$TMP/ssd/compress.idx" >/dev/null
 ./zpaqoec oec_idx verify compress --idx "$TMP/ssd/compress.idx" >/dev/null
+
+
+# Explicit IDX1 -> IDX2 migration path.
+cat > "$TMP/make_v1.cpp" <<'CPP'
+#include "extensions/oec_idx.hpp"
+#include <cstdio>
+int main(){std::string e; if(!oecidx::write_cache_v1_legacy("ssd/legacy.idx","compress.000","legacy-list\n","legacy-info\n",e)){std::fprintf(stderr,"%s\n",e.c_str());return 1;}return 0;}
+CPP
+g++ -std=c++11 -O2 "$TMP/make_v1.cpp" -o "$TMP/make_v1"
+./make_v1
+if ./zpaqoec oec_idx verify compress --idx "$TMP/ssd/legacy.idx" >/dev/null 2>&1; then
+  echo 'legacy IDX1 unexpectedly reported current'; exit 1
+fi
+./zpaqoec oec_idx info compress --idx "$TMP/ssd/legacy.idx" | grep -Fq 'OECIDX v1'
+./zpaqoec oec_idx upgrade compress --idx "$TMP/ssd/legacy.idx" >/dev/null
+./zpaqoec oec_idx verify compress --idx "$TMP/ssd/legacy.idx" >/dev/null
+./zpaqoec oec_idx info compress --idx "$TMP/ssd/legacy.idx" | grep -Fq 'OECIDX v2'
+
+# ensure is no-op for current cache, self-heal for stale cache.
+./zpaqoec oec_idx ensure compress --idx "$TMP/ssd/legacy.idx" >/dev/null
+printf 'ensure-stale\n' >> compress.000
+./zpaqoec oec_idx ensure compress --idx "$TMP/ssd/legacy.idx" >/dev/null
+./zpaqoec oec_idx verify compress --idx "$TMP/ssd/legacy.idx" >/dev/null
 
 ./zpaqoec oec_idx drop compress --idx "$TMP/ssd/compress.idx" >/dev/null
 [ ! -e "$TMP/ssd/compress.idx" ]
