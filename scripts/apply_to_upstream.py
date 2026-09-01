@@ -2,12 +2,17 @@
 import argparse, pathlib, re, shutil, sys
 
 MARK_INCLUDE = '#include "extensions/zpaqfranz_ext.hpp"'
-MARK_HOOK = '/* ZPAQFRANZ_TRUNKEC_DISPATCH */'
+MARK_HOOK = '/* ZPAQFRANZ_OEC_DISPATCH */'
+OLD_MARK_HOOK = '/* ZPAQFRANZ_TRUNKEC_DISPATCH */'
 
-def find_main_open_brace(text: str) -> int:
+def find_main_match(text: str):
     m = re.search(r'\bint\s+main\s*\(', text)
     if not m:
         raise RuntimeError('cannot find int main(...)')
+    return m
+
+def find_main_open_brace(text: str) -> int:
+    m = find_main_match(text)
     i = text.find('(', m.start())
     depth = 0
     in_str = in_chr = False
@@ -39,7 +44,7 @@ def find_main_open_brace(text: str) -> int:
     return brace
 
 def main():
-    ap=argparse.ArgumentParser(description='Inject trunk+EC extension into zpaqfranz monolithic source')
+    ap=argparse.ArgumentParser(description='Inject OEC (Optimize + Error Correction) extension into zpaqfranz monolithic source')
     ap.add_argument('upstream', help='path to upstream zpaqfranz.cpp')
     ap.add_argument('--out', help='output cpp (default: patch in place)')
     ap.add_argument('--extension-dir', default=None, help='destination extension dir (default: sibling extensions/)')
@@ -57,16 +62,32 @@ def main():
     shutil.copy2(here/'zpaqfranz_ext.hpp', extdir/'zpaqfranz_ext.hpp')
 
     text=src.read_text(errors='surrogateescape')
-    changed=False
-    if MARK_INCLUDE not in text:
-        # Put it before the monolith so the extension remains isolated.
-        text = MARK_INCLUDE + '\n' + text
-        changed=True
+    original=text
+
+    # IMPORTANT: never include the extension at line 1. zpaqfranz establishes
+    # Windows/POSIX feature macros and compatibility wrappers before its normal
+    # headers/functions. Pulling <cstdio> from zfec.hpp in before those defines
+    # changes MinGW/UCRT declarations (notably fseeko) and can make upstream's
+    # own fseeko(FP,int64_t,...) wrapper ambiguous. Put the extension immediately
+    # before main(), after the monolith's platform compatibility layer is complete.
+    include_re = re.compile(r'(?m)^[ \t]*#include[ \t]+"extensions/zpaqfranz_ext\.hpp"[ \t]*(?:\r?\n|$)')
+    text = include_re.sub('', text)
+    main_match = find_main_match(text)
+    main_start = main_match.start()
+    prefix = '' if main_start == 0 or text[main_start-1] == '\n' else '\n'
+    text = text[:main_start] + prefix + MARK_INCLUDE + '\n' + text[main_start:]
+
+    # Migrate the 0.1.x marker in place. The actual hook call is unchanged,
+    # so already-patched upstream sources do not get a second dispatcher.
+    if OLD_MARK_HOOK in text:
+        text = text.replace(OLD_MARK_HOOK, MARK_HOOK)
+
     if MARK_HOOK not in text:
         brace=find_main_open_brace(text)
         hook='\n  '+MARK_HOOK+'\n  { const int zfext_rc = zfext::dispatch(argc, argv); if (zfext_rc != zfext::kNotHandled) return zfext_rc; }\n'
         text=text[:brace+1]+hook+text[brace+1:]
-        changed=True
+
+    changed = (text != original)
     out.write_text(text, errors='surrogateescape')
     print(f'{"patched" if changed else "already patched"}: {out}')
     print(f'extensions: {extdir}')

@@ -1,6 +1,6 @@
 param(
   [string]$Upstream = "$PSScriptRoot\..\upstream\zpaqfranz.cpp",
-  [string]$Out = "$PSScriptRoot\..\build\zpaqfranz-trunkec.exe",
+  [string]$Out = "$PSScriptRoot\..\build\zpaqoec.exe",
   [string]$Compiler = ""
 )
 $ErrorActionPreference = 'Stop'
@@ -138,9 +138,61 @@ Write-Host "target:   $($Selected.Target)"
 $OutDir = Split-Path -Parent $Out
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
-# Minimal upstream-compatible Windows build. Explicit include root is needed for:
+# Native MSYS2/MinGW executables spawn cc1plus/as/ld and load runtime DLLs
+# from the toolchain bin directory. Upstream's own Windows batch prepends this
+# directory to PATH before compiling. Do the same here so invoking g++.exe
+# directly from PowerShell is reliable even if PATH currently prefers Cygwin.
+$CompilerDir = Split-Path -Parent $Cxx
+$OldPath = $env:PATH
+if (($env:PATH -split ';') -notcontains $CompilerDir) {
+  $env:PATH = "$CompilerDir;$env:PATH"
+}
+Write-Host "toolchain PATH+: $CompilerDir"
+
+# Explicit include root is needed for:
 #   #include "extensions/zpaqfranz_ext.hpp"
-& $Cxx -O3 -std=c++11 "-I$UpstreamDir" "$UpstreamPath" -o "$Out" -pthread -static
-if ($LASTEXITCODE -ne 0) { throw "MinGW g++ failed with exit code $LASTEXITCODE" }
+$CompileArgs = @(
+  '-O3',
+  '-std=c++11',
+  "-I$UpstreamDir",
+  $UpstreamPath,
+  '-o', $Out,
+  '-pthread',
+  '-static',
+  '-lurlmon'
+)
+
+$CompileLog = "$Out.compile.log"
+try {
+  # Capture both stdout and stderr, then replay it. This avoids PowerShell's
+  # native-command stderr handling hiding the real compiler/linker diagnostic.
+  $OldEap = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $CompilerOutput = @(& $Cxx @CompileArgs 2>&1)
+    $CompileExit = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $OldEap
+  }
+
+  $CompilerText = (($CompilerOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine)
+  Set-Content -LiteralPath $CompileLog -Value $CompilerText -Encoding UTF8
+  if (-not [string]::IsNullOrWhiteSpace($CompilerText)) {
+    Write-Host $CompilerText
+  }
+
+  if ($CompileExit -ne 0) {
+    throw @"
+MinGW g++ failed with exit code $CompileExit
+compiler: $Cxx
+target:   $($Selected.Target)
+log:      $CompileLog
+"@
+  }
+} finally {
+  $env:PATH = $OldPath
+}
+
 if (-not (Test-Path -LiteralPath $Out)) { throw "compiler returned success but output is missing: $Out" }
 Write-Host "built: $Out"
+Write-Host "compile log: $CompileLog"

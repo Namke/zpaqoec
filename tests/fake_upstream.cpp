@@ -13,25 +13,32 @@ static bool splitpat(const std::string& pat, std::string& prefix, std::string& s
 static std::string pnum(const std::string& prefix,const std::string& suffix,unsigned digits,unsigned n){
   std::ostringstream s; s<<prefix<<std::setw(digits)<<std::setfill('0')<<n<<suffix; return s.str();
 }
+static void log_call(int argc, char** argv) {
+  FILE* f=fopen("native_calls.log","ab"); if(!f) return;
+  for(int i=1;i<argc;++i) std::fprintf(f,"%s%s", i==1?"":"|", argv[i]);
+  std::fprintf(f,"\n"); fclose(f);
+}
 int main(int argc, char** argv) {
   if(argc<3) { std::fprintf(stderr,"fake upstream: missing args\n"); return 2; }
-  std::string cmd=argv[1], pat=argv[2], prefix,suffix; unsigned digits=0;
-  if(!splitpat(pat,prefix,suffix,digits)) return 3;
+  log_call(argc, argv);
+  std::string cmd=argv[1], arc=argv[2], prefix,suffix; unsigned digits=0;
   std::string idx;
   for(int i=3;i+1<argc;++i) if(std::string(argv[i])=="-index") idx=argv[i+1];
-  if(idx.empty()) return 4;
 
   if(cmd=="a") {
+    if(!splitpat(arc,prefix,suffix,digits)) return 3;
+    if(idx.empty()) return 4;
     unsigned n=1;
-    for(;;++n){ std::string p=pnum(prefix,suffix,digits,n); if(!ex(p)) { pat=p; break; } }
-    FILE* f=fopen(pat.c_str(),"wb"); if(!f)return 5;
+    for(;;++n){ std::string p=pnum(prefix,suffix,digits,n); if(!ex(p)) { arc=p; break; } }
+    FILE* f=fopen(arc.c_str(),"wb"); if(!f)return 5;
     for(int i=0;i<3*1024*1024+123;++i) fputc((i*17+n*31)&255,f); fclose(f);
-    FILE* ix=fopen(idx.c_str(),"ab"); if(!ix)return 6; std::fprintf(ix,"part=%u %s\n",n,pat.c_str()); fclose(ix);
-    std::printf("fake add wrote %s and %s\n",pat.c_str(),idx.c_str());
+    FILE* ix=fopen(idx.c_str(),"ab"); if(!ix)return 6; std::fprintf(ix,"part=%u %s\n",n,arc.c_str()); fclose(ix);
+    std::printf("fake add wrote %s and %s\n",arc.c_str(),idx.c_str());
     return 0;
   }
 
-  if(cmd=="x") {
+  if(cmd=="x" && !idx.empty()) {
+    if(!splitpat(arc,prefix,suffix,digits)) return 3;
     FILE* ix=fopen(idx.c_str(),"wb"); if(!ix)return 6;
     unsigned count=0;
     for(unsigned n=1;;++n){
@@ -44,5 +51,19 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  std::fprintf(stderr,"fake upstream: only a/x supported\n"); return 2;
+  if(cmd=="l" || cmd=="i") {
+    if(arc.find('?')!=std::string::npos) { std::fprintf(stderr,"fake metadata command was given multipart pattern\n"); return 20; }
+    if(!ex(arc)) return 21;
+    std::printf("fake %s metadata from %s\n",cmd.c_str(),arc.c_str());
+    return 0;
+  }
+
+  if(cmd=="x" || cmd=="e") {
+    if(!splitpat(arc,prefix,suffix,digits)) { std::fprintf(stderr,"fake extract command requires multipart pattern\n"); return 22; }
+    if(!ex(pnum(prefix,suffix,digits,1))) return 23;
+    std::printf("fake %s payload from %s\n",cmd.c_str(),arc.c_str());
+    return 0;
+  }
+
+  std::fprintf(stderr,"fake upstream unsupported command: %s\n",cmd.c_str()); return 2;
 }

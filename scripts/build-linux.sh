@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 UPSTREAM="${1:-$ROOT/upstream/zpaqfranz.cpp}"
-OUT="${2:-$ROOT/build/zpaqfranz-trunkec}"
+OUT="${2:-$ROOT/build/zpaqoec}"
 
 if [[ ! -f "$UPSTREAM" ]]; then
   printf 'upstream source not found: %s\n' "$UPSTREAM" >&2

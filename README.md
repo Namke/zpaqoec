@@ -1,34 +1,62 @@
-# zpaqfranz-trunkec 0.1.1
+# zpaqoec 0.2.0
 
-Fork overlay for zpaqfranz 64.8 adding:
+**OEC = Optimize + Error Correction.**
 
-1. **Trunk/index-first incremental add** through upstream indexed multipart support.
-2. **Independent `.ec` sidecars** (`compress.001.ec`) able to detect and repair accidental bitrot.
+This project is a thin fork/overlay for zpaqfranz 64.8. Its main target is to keep normal ZPAQ archive-part bytes unchanged while adding:
 
-The extension does not alter the bytes of ZPAQ archive parts. `compress.001`, `compress.002`, ... remain normal ZPAQ multipart files. Recovery information is entirely external.
+1. a zero-part metadata index (`compress.000`) so optimized metadata/update paths do not scan all old data parts;
+2. independent error-correction sidecars (`compress.NNN.ec`);
+3. an OEC command namespace that can gain further acceleration (notably the future disk-backed `.idx` cache) without changing the original zpaqfranz commands.
 
-## Output layout
+The original commands (`a`, `l`, `i`, `x`, `e`, ...) remain untouched and provide an upstream-compatible baseline.
+
+## OEC archive layout
 
 ```text
-compress.000          upstream ZPAQ index/trunk
-compress.000.ec       EC for the trunk (small and optional)
-compress.001          normal ZPAQ part
-compress.001.ec       EC sidecar
+compress.000          standard ZPAQ metadata-only index
+compress.000.ec       EC sidecar for the zero part
+compress.001          normal ZPAQ multipart data
+compress.001.ec       independent EC sidecar
 compress.002
 compress.002.ec
-compress.ecstate      tiny part-number checkpoint; avoids filename walks on normal runs
+...
+compress.ecstate      tiny OEC part-number checkpoint
+
+# planned / not in 0.2.0
+X:/fast-cache/compress.idx   disposable SSD/NVMe disk-backed acceleration cache
 ```
 
+`compress.001`, `.002`, ... are not modified by OEC. The `.ec` files are external to ZPAQ format.
 
-## Retrofit an existing multipart archive
+## Public OEC commands
 
-For archives that were already created without an external trunk/index or EC sidecars:
+| Command | Purpose | Current read source |
+|---|---|---|
+| `oecinit` | Retrofit an existing multipart archive with `000` + EC | scans old parts once |
+| `oec_a` | Incremental add through the zero-part index + EC | `000` + source filesystem; new data part only |
+| `oec_l` | Optimized equivalent of native `l` | **`000` only** |
+| `oec_i` | Optimized equivalent of native `i` | **`000` only** |
+| `oec_x` | OEC equivalent of native `x` | `000` is OEC authority; payload currently read from multipart data pattern |
+| `oec_e` | OEC equivalent of native `e` | same current routing as `oec_x` |
+| `ec ...` | EC create/verify/repair/info | target part + sidecar |
+
+The old public extension names `trunkinit` and `trunkadd` are intentionally no longer dispatched.
+
+### Why `oec_l` / `oec_i` can use only `000`
+
+The zero part is a standard ZPAQ index containing the archive metadata but no compressed D blocks. List/info operations need metadata, not file payload, so they can operate directly on the zero part.
+
+### Why `oec_x` / `oec_e` still address the data parts
+
+A ZPAQ index deliberately omits D blocks, so it cannot itself extract file contents. In 0.2.0 `oec_x`/`oec_e` normalize the OEC archive layout but still call the native extraction command on the multipart pattern. When `.idx` is added, these commands will use it for fast file/fragment/part lookup and then open only required data parts where the upstream integration permits it.
+
+## Initialize an existing archive
 
 ```bash
-zpaqfranz trunkinit "compress.???"
+zpaqoec oecinit "compress.???"
 ```
 
-The zero part is inferred by replacing `?` with `0`, so the command above creates:
+Creates:
 
 ```text
 compress.000
@@ -39,181 +67,147 @@ compress.002.ec
 compress.ecstate
 ```
 
-The existing `compress.001`, `compress.002`, ... files are **read only** and are never rewritten.
-Internally trunk generation uses native ZPAQ semantics:
+Existing `compress.001`, `.002`, ... are read-only during retrofit.
+
+Internally index creation uses native ZPAQ semantics:
 
 ```text
-zpaqfranz x "compress.???" -index compress.000
+x "compress.???" -index compress.000
 ```
 
-`extract -index` creates the metadata-only index and does not extract payload files. The extension builds the index to a temporary file first and atomically installs it after the native command succeeds.
-
-Generic ZPAQ-style naming is also supported:
+Generic naming is supported:
 
 ```bash
-zpaqfranz trunkinit "backup_????????.zpaq"
+zpaqoec oecinit "backup_????????.zpaq"
 ```
 
-which infers `backup_00000000.zpaq` as the index. Override it when required:
+Encrypted archive:
 
 ```bash
-zpaqfranz trunkinit "backup_????????.zpaq" -index /safe/index/backup.000
+zpaqoec oecinit "secret.???" -key PASSWORD
 ```
 
-Encrypted archives pass normal read options through to the native index builder:
+Force regeneration:
 
 ```bash
-zpaqfranz trunkinit "secret.???" -key PASSWORD
+zpaqoec oecinit "compress.???" --force
 ```
 
-By default an existing index is not overwritten. Use `--force` to rebuild the index and regenerate existing EC sidecars. Existing `.ec` files are otherwise skipped.
-
-## Main workflow
+## Incremental add
 
 ```bash
-zpaqfranz trunkadd compress /data -method 5
+zpaqoec oec_a compress /data -method 5
 ```
 
-Internally this invokes the normal zpaqfranz add path as:
+Conceptually invokes:
 
 ```text
-zpaqfranz a compress.??? /data -method 5 -index compress.000
+a "compress.???" /data -method 5 -index compress.000
 ```
 
-After the new part is committed, the extension writes its EC sidecar and refreshes the trunk EC.
+then protects the newly committed part and refreshes `compress.000.ec`.
 
-The next run reads `compress.ecstate` to know the expected next part. It does **not** scan old part contents. If `.ecstate` is lost while `compress.000` still exists, it performs a one-time filename-only recovery and recreates the state.
+Useful options:
 
-### EC commands
+```text
+--digits N
+--ec-data N
+--ec-shard BYTES
+--ec-stripes N
+--no-index-ec
+--no-part-ec
+```
+
+For backward compatibility, `--no-trunk-ec` is still accepted internally but is no longer documented as OEC terminology.
+
+## Optimized read commands
+
+Default 3-digit layout:
 
 ```bash
-zpaqfranz ec create compress.001
-zpaqfranz ec verify compress.001
-zpaqfranz ec repair compress.001 --output compress.001.repaired
-zpaqfranz ec info compress.001.ec
+zpaqoec oec_l compress -all
+zpaqoec oec_i compress
+zpaqoec oec_x compress path/to/file -to restore
+zpaqoec oec_e compress path/to/file
 ```
 
-Default repair never overwrites the damaged archive.
+Generic pattern:
 
-## EC v1 format and tolerance
+```bash
+zpaqoec oec_l "backup_????????.zpaq"
+zpaqoec oec_x "backup_????????.zpaq" some/file
+```
 
-Default geometry:
+Custom zero-part path:
+
+```bash
+zpaqoec oec_l compress --oec-index X:/metadata/compress.000
+```
+
+`--oec-index` is an OEC routing option. Native `-index` is rejected on `oec_l/i/x/e` to avoid conflicting with ZPAQ's different `extract -index` meaning.
+
+## EC commands
+
+```bash
+zpaqoec ec create compress.001
+zpaqoec ec verify compress.001
+zpaqoec ec repair compress.001 --output compress.001.repaired
+zpaqoec ec info compress.001.ec
+```
+
+Default EC geometry remains:
 
 ```text
 shard size          64 KiB
 data shards         32
 parity shards        2 (P + Q over GF(256))
 stripes/window      64
-window capacity    128 MiB
 nominal parity       6.25%
 ```
 
-Each data shard has CRC32C. Each parity shard also has CRC32C. Metadata has an independent CRC32C.
+## `.idx` roadmap contract
 
-P is XOR parity. Q is weighted GF(256) parity. This allows exact reconstruction of:
+`.idx` is **not implemented in 0.2.0**. The OEC command router is centralized so the future cache can be inserted without changing public commands.
 
-- one bad data shard with either P or Q available;
-- two bad data shards when both parity shards are intact;
-- one bad data shard even when one parity shard itself has bitrot.
-
-More than two bad data shards in the same stripe are reported as unrecoverable.
-
-### Interleave layout
-
-Within a full 128 MiB window, physical shards rotate across 64 stripes:
+Target behavior:
 
 ```text
-lane0: stripe0, stripe1, ... stripe63
-lane1: stripe0, stripe1, ... stripe63
-...
+compress.000     authoritative, portable, recoverable
+compress.idx     disposable, rebuildable, SSD/NVMe-friendly
 ```
 
-Therefore a contiguous 4 MiB damaged region normally hits one shard per stripe rather than 64 shards in one stripe. A contiguous region up to roughly 8 MiB can normally consume at most the two-parity budget per stripe (alignment and window boundaries still matter).
+When implemented:
 
-## Build against upstream
+- `oec_l` / `oec_i`: prefer `.idx`, fallback to `000`;
+- `oec_a`: use disk-backed/mmap fragment/file lookup where possible, with `000` remaining authoritative;
+- `oec_x` / `oec_e`: use `.idx` to resolve file -> fragments -> required part/block locations before reading payload;
+- stale/missing `.idx`: discard/rebuild, never compromise archive recoverability.
 
-Fetch the pinned 64.8 source if needed:
-
-```bash
-./scripts/fetch-upstream.sh
-```
-
-Or on Windows PowerShell:
-
-```powershell
-.\scripts\fetch-upstream.ps1
-```
-
-Put upstream `zpaqfranz.cpp` anywhere, then:
-
-```bash
-python3 scripts/apply_to_upstream.py /path/to/zpaqfranz.cpp
-g++ -O3 -std=c++11 /path/to/zpaqfranz.cpp -o zpaqfranz -pthread
-```
-
-The injector:
-
-- copies `zfec.hpp` and `zpaqfranz_ext.hpp` into a sibling `extensions/` directory;
-- adds one include;
-- adds one early dispatcher inside `main()`;
-- leaves all original commands untouched.
-
-It is idempotent.
-
-Windows/MSYS2:
-
-```powershell
-.\scripts\build-windows.ps1 -Upstream C:\src\zpaqfranz\zpaqfranz.cpp
-```
+## Build
 
 Linux:
 
 ```bash
-./scripts/build-linux.sh /src/zpaqfranz/zpaqfranz.cpp
+./scripts/build-linux.sh /path/to/zpaqfranz.cpp
+# default output: build/zpaqoec
 ```
 
-## Current implementation boundary
+Windows / MSYS2 UCRT64:
 
-0.1.0 creates EC **immediately after the ZPAQ part has finalized**, so it performs one sequential reread of the new part. This already satisfies independent sidecar protection and keeps old parts untouched.
+```powershell
+.\scripts\build-windows.ps1 -Compiler 'C:\Programs\msys64\ucrt64\bin\g++.exe'
+# default output: build\zpaqoec.exe
+```
 
-The next integration step is to hook the ordered ZPAQ output writer and feed the same output buffers to the EC encoder, eliminating that reread. The EC format is already windowed/stream-friendly, so this does not require a format change.
+The injector is idempotent and migrates 0.1.x patched sources: it relocates the extension include to just before upstream `main()` and converts the old `ZPAQFRANZ_TRUNKEC_DISPATCH` marker to `ZPAQFRANZ_OEC_DISPATCH` without duplicating the hook.
 
 ## Tests
 
 ```bash
 g++ -std=c++11 -O2 src/zfec_cli.cpp -o zfec
 ./tests/run_ec_tests.sh
+./tests/run_injector_tests.sh
+./tests/run_oec_a_tests.sh
+./tests/run_oecinit_tests.sh
+./tests/run_oec_command_tests.sh
 ```
-
-Covered now:
-
-- clean create/verify;
-- two bad shards in one stripe -> byte-identical repair;
-- three bad shards in one stripe -> unrecoverable;
-- tail truncation -> recovered;
-- one bad data shard + one corrupt parity shard -> recovered;
-- AddressSanitizer + UndefinedBehaviorSanitizer pass.
-
-### Windows compiler selection (0.1.3+)
-
-The Windows build script validates the compiler target before compiling. It prefers the upstream-recommended MSYS2 UCRT64 compiler:
-
-```powershell
-.\scripts\build-windows.ps1 -Compiler C:\msys64\ucrt64\bin\g++.exe
-```
-
-You can also pin it for the current shell:
-
-```powershell
-$env:ZPAQFRANZ_GXX='C:\msys64\ucrt64\bin\g++.exe'
-.\scripts\build-windows.ps1
-```
-
-A valid Windows compiler should report a MinGW target, for example:
-
-```powershell
-C:\msys64\ucrt64\bin\g++.exe -dumpmachine
-# x86_64-w64-mingw32
-```
-
-Do not use a Linux/Cygwin/non-MinGW `g++` to build the Windows binary. If the wrong compiler is selected, upstream takes POSIX code paths and emits errors for `fseeko`, `ftello`, `fileno`, `ftruncate`, `usleep`, `realpath`, `select`, etc.
