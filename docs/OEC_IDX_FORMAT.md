@@ -17,7 +17,7 @@ zpaqoec oec_idx build compress --idx /fast/cache/compress.idx
 
 ## Encryption/privacy policy
 
-`OECIDX1` stores the materialized default `l` and `i` views. These sections are plaintext. For a standard AES-encrypted ZPAQ zero-part, OEC 0.3.5 therefore disables plaintext IDX creation and automatic use by default. The durable encrypted archive, `.000`, and `.ec` files remain unaffected.
+`OECIDX1` stores the materialized default `l` and `i` views. These sections are plaintext. For a standard AES-encrypted ZPAQ zero-part, OEC 0.3.6 therefore disables plaintext IDX creation and automatic use by default. The durable encrypted archive, `.000`, and `.ec` files remain unaffected.
 
 Explicit opt-in:
 
@@ -27,7 +27,7 @@ zpaqoec oec_idx build secret.zpaq --idx /fast/secret.idx --idx-plaintext -key PA
 
 `FRANZKEY` is inherited by the native metadata child processes and avoids repeated interactive prompts. Without a supplied key, explicit plaintext-cache mode shows progress and visibly announces each password wait instead of capturing the prompt. Authentication prompt/mask chatter is removed before writing cache sections.
 
-An `.idx` created by 0.3.1 for an encrypted archive may already contain plaintext metadata. 0.3.5 will not use it automatically unless `--idx-plaintext` is supplied; `oec_idx drop` can remove it.
+An `.idx` created by 0.3.1 for an encrypted archive may already contain plaintext metadata. 0.3.6 will not use it automatically unless `--idx-plaintext` is supplied; `oec_idx drop` can remove it.
 
 ## Storage / mmap
 
@@ -97,7 +97,7 @@ If `PASSWORD_FOLDER` is set and neither explicit `-key`/`-franzen` nor `FRANZKEY
 
 Password files are external operator secrets and are never copied into `.idx`, `.000`, or `.ec`.
 
-## Current acceleration coverage (0.3.5)
+## Current acceleration coverage (0.3.6)
 
 | Command/path | v1 cache use |
 |---|---|

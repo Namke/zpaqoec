@@ -1,4 +1,4 @@
-## 0.3.5 - progressive JSON MD5
+## 0.3.6 - progressive JSON MD5
 
 Implemented force-extract MD5 catalogs and source-side progressive MD5 refresh on `oec_a`, with atomic JSON replacement and force-create gating.
 

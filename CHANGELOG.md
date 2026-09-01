@@ -1,9 +1,20 @@
 # Changelog
 
+## 0.3.6 - resilient zpaqfranz list parser for JSON catalogs
+
+- Fixes `oec_json: could not parse file records` on real zpaqfranz 64.8 list layouts that differ from the original fake-harness format.
+- Adds ANSI stripping and accepts ISO/slash/compact date-time representations plus pipe-status and plain/legacy list layouts.
+- Makes metadata field detection tolerant of spacing and column-order drift while preserving filenames containing spaces.
+- If the current `l -terse` pass yields no parseable records, retries `l -all -terse`, parses explicit version/status records, and collapses them to the current live file set.
+- Deleted latest records are excluded during the `-all` fallback.
+- The same resilient parser is used by progressive JSON refresh after `oec_a`.
+- Adds format-drift regressions for slash+compact timestamps, plain records, filenames with spaces, deleted histories, and `-all` fallback.
+- No ZPAQ, EC, IDX, or JSON schema format changes.
+
 ## 0.3.5 - progressive JSON MD5 catalog
 
 - `oec_json --force-md5` extracts the archive once to an isolated temporary tree, calculates whole-file MD5 values, and writes them into the JSON catalog.
-- JSON schema is now format version 2 with `md5`, `md5_source`, `md5_file_count`, and `md5_complete`.
+- JSON schema is format version 2 with `md5`, `md5_source`, `md5_file_count`, and `md5_complete`.
 - `oec_a` progressively refreshes an existing archive JSON after a successful add and calculates MD5 directly from source files.
 - `oec_a --json-force` / `--force-json` creates the JSON when it does not already exist; without the flag, missing JSON remains untouched.
 - Progressive updates retain old MD5 only when file path, size, and modified timestamp are unchanged.

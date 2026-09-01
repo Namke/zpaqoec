@@ -27,7 +27,7 @@
 namespace zfext {
 
 static const int kNotHandled = -777777;
-static const char* const kOecOverlayVersion = "0.3.5";
+static const char* const kOecOverlayVersion = "0.3.6";
 
 inline std::string zero_suffix(uint64_t n, uint32_t digits) {
   std::ostringstream s; s << std::setw(static_cast<int>(digits)) << std::setfill('0') << n; return s.str();
@@ -1007,76 +1007,112 @@ inline bool oec_parse_u64_digits(const std::string& token, uint64_t& out) {
   return true;
 }
 
-inline bool oec_looks_iso_date(const std::string& s) {
-  return s.size()==10 && s[4]=='-' && s[7]=='-'
-      && s[0]>='0'&&s[0]<='9' && s[1]>='0'&&s[1]<='9'
-      && s[2]>='0'&&s[2]<='9' && s[3]>='0'&&s[3]<='9';
-}
-
-inline bool oec_parse_list_record_pipe(const std::string& line, OecJsonFileRecord& r) {
-  const size_t bar=line.find('|');
-  if(bar==std::string::npos) return false;
-  const std::string left=oec_trim_copy(line.substr(0,bar));
-  std::string right=oec_trim_copy(line.substr(bar+1));
-  if(right.empty()) return false;
-  const char status=right[0];
-  if(status!='+' && status!='-' && status!='#' && status!='=') return false;
-  right=oec_trim_copy(right.substr(1));
-  if(right.empty() || right=="?") return false;
-  if(left.find("deleted/inacessible")==0 || left.find("deleted/inaccessible")==0) return false;
-  const std::vector<std::string> t=oec_split_ws(left);
-  if(t.size()<4 || !oec_looks_iso_date(t[0])) return false;
-  r.modified=t[0] + (t.size()>1 ? std::string("T")+t[1] : std::string());
-  r.attributes=t.size()>2?t[2]:std::string();
-  if(!oec_parse_grouped_u64(t.size()>3?t[3]:std::string(),r.size)) return false;
-  r.ratio_percent=-1;
-  for(size_t i=4;i<t.size();++i) {
-    if(!t[i].empty() && t[i][t[i].size()-1]=='%') {
-      uint64_t v=0; if(oec_parse_u64_digits(t[i].substr(0,t[i].size()-1),v) && v<=10000) r.ratio_percent=static_cast<int>(v);
-    }
+inline bool oec_looks_date(const std::string& s) {
+  if(s.size()==10 && (s[4]=='-'||s[4]=='/') && s[7]==s[4]) {
+    for(size_t i=0;i<s.size();++i) if(i!=4&&i!=7 && (s[i]<'0'||s[i]>'9')) return false;
+    return true;
   }
-  r.version=0;
-  for(size_t i=t.size();i>0;--i) {
-    uint64_t v=0; if(oec_parse_u64_digits(t[i-1],v)) { r.version=v; break; }
+  if(s.size()==8) { for(size_t i=0;i<8;++i) if(s[i]<'0'||s[i]>'9') return false; return true; }
+  return false;
+}
+inline bool oec_looks_time(const std::string& s) {
+  if(s.size()==8 && s[2]==':' && s[5]==':') {
+    for(size_t i=0;i<8;++i) if(i!=2&&i!=5 && (s[i]<'0'||s[i]>'9')) return false;
+    return true;
   }
-  r.path=right; r.status=status;
-  bool isdir=false;
-  if(!r.attributes.empty() && r.attributes[0]=='d') isdir=true;
-  if(r.attributes.size()>4 && r.attributes[4]=='D') isdir=true;
-  r.type=isdir?"directory":"file";
-  return true;
+  if(s.size()==6) { for(size_t i=0;i<6;++i) if(s[i]<'0'||s[i]>'9') return false; return true; }
+  return false;
 }
-
-// Compatibility parser for older terse/list layouts that omit the |status field:
-//   - 2019-09-23 10:14:44 2.943.578.106 0666 /path/name
-inline bool oec_parse_list_record_legacy(const std::string& line, OecJsonFileRecord& r) {
-  std::string s=oec_trim_copy(line);
-  if(s.size()<3 || (s[0]!='-' && s[0]!='+' && s[0]!='=' && s[0]!='#')) return false;
-  const char status=s[0]; s=oec_trim_copy(s.substr(1));
-  std::vector<std::string> t=oec_split_ws(s);
-  if(t.size()<5 || !oec_looks_iso_date(t[0])) return false;
-  uint64_t sz=0;
-  if(!oec_parse_grouped_u64(t[2],sz)) return false;
-  const size_t p0=s.find(t[4]);
-  if(p0==std::string::npos) return false;
-  r.modified=t[0]+std::string("T")+t[1]; r.size=sz; r.attributes=t[3];
-  r.path=s.substr(p0); r.status=status; r.version=0; r.ratio_percent=-1;
-  bool isdir=!r.attributes.empty() && r.attributes[0]=='d';
-  r.type=isdir?"directory":"file";
-  return true;
+inline std::string oec_isoish_datetime(std::string d,std::string t) {
+  if(d.size()==8) d=d.substr(0,4)+"-"+d.substr(4,2)+"-"+d.substr(6,2);
+  if(d.size()==10 && d[4]=='/') { d[4]='-'; d[7]='-'; }
+  if(t.size()==6) t=t.substr(0,2)+":"+t.substr(2,2)+":"+t.substr(4,2);
+  return d + (t.empty()?std::string():std::string("T")+t);
 }
-
+inline std::string oec_strip_ansi_copy(const std::string& in) {
+  std::string out; out.reserve(in.size());
+  for(size_t i=0;i<in.size();) {
+    if((unsigned char)in[i]==0x1b && i+1<in.size() && in[i+1]=='[') {
+      i+=2; while(i<in.size()) { char c=in[i++]; if((c>='@'&&c<='~')) break; }
+    } else out+=in[i++];
+  }
+  return out;
+}
+inline bool oec_looks_attr_token(const std::string& s) {
+  if(s.empty()) return false;
+  if(s.size()==4 && s[0]=='0') { for(size_t i=1;i<4;++i) if(s[i]<'0'||s[i]>'7') return false; return true; }
+  if((s[0]=='d'||s[0]=='-'||s[0]=='l') && s.size()>=4) return true;
+  bool alpha=false; for(size_t i=0;i<s.size();++i) { char c=s[i]; if((c>='A'&&c<='Z')||(c>='a'&&c<='z')) alpha=true; else if(c!='-'&&c!='.') return false; }
+  return alpha && s.size()<=16;
+}
+struct OecTokSpan { std::string s; size_t a,b; OecTokSpan(const std::string& x,size_t aa,size_t bb):s(x),a(aa),b(bb){} };
+inline std::vector<OecTokSpan> oec_split_ws_spans(const std::string& in) {
+  std::vector<OecTokSpan> out; size_t i=0;
+  while(i<in.size()) { while(i<in.size()&&(in[i]==' '||in[i]=='\t'))++i; if(i>=in.size())break; size_t a=i; while(i<in.size()&&in[i]!=' '&&in[i]!='\t')++i; out.push_back(OecTokSpan(in.substr(a,i-a),a,i)); }
+  return out;
+}
+inline void oec_finish_record_type(OecJsonFileRecord& r) {
+  bool isdir=false; if(!r.attributes.empty()&&(r.attributes[0]=='d'||(r.attributes.size()>4&&r.attributes[4]=='D')))isdir=true;
+  if(!r.path.empty() && (r.path[r.path.size()-1]=='/'||r.path[r.path.size()-1]=='\\')) isdir=true;
+  r.type=isdir?"directory":"file";
+}
+inline bool oec_parse_metadata_left(const std::string& left, OecJsonFileRecord& r) {
+  const std::vector<std::string> t=oec_split_ws(left); if(t.size()<2) return false;
+  size_t di=t.size(), ti=t.size();
+  for(size_t i=0;i<t.size();++i) if(oec_looks_date(t[i])) { di=i; if(i+1<t.size()&&oec_looks_time(t[i+1]))ti=i+1; break; }
+  if(di==t.size()) return false;
+  r.modified=oec_isoish_datetime(t[di],ti<t.size()?t[ti]:std::string()); r.attributes.clear(); r.size=0; r.ratio_percent=-1; r.version=0;
+  size_t begin=(ti<t.size()?ti+1:di+1), attri=t.size();
+  for(size_t i=begin;i<t.size();++i) if(oec_looks_attr_token(t[i])) { attri=i; r.attributes=t[i]; break; }
+  // Version is normally the final integer before |status.
+  for(size_t i=t.size();i>begin;--i) { uint64_t v=0; if(oec_parse_u64_digits(t[i-1],v) && i-1!=attri) { r.version=v; break; } }
+  for(size_t i=begin;i<t.size();++i) if(!t[i].empty()&&t[i][t[i].size()-1]=='%') { uint64_t v=0; if(oec_parse_u64_digits(t[i].substr(0,t[i].size()-1),v)&&v<=10000)r.ratio_percent=(int)v; }
+  // Prefer numeric token adjacent to attributes; then first numeric token that is not ratio/version/attrs.
+  bool have=false; uint64_t sz=0;
+  if(attri<t.size()) {
+    if(attri+1<t.size() && oec_parse_grouped_u64(t[attri+1],sz) && t[attri+1].find('%')==std::string::npos) have=true;
+    else if(attri>begin && oec_parse_grouped_u64(t[attri-1],sz)) have=true;
+  }
+  if(!have) for(size_t i=begin;i<t.size();++i) {
+    if(i==attri || (!t[i].empty()&&t[i][t[i].size()-1]=='%')) continue;
+    uint64_t v=0; if(!oec_parse_grouped_u64(t[i],v))continue;
+    if(r.version && v==r.version && i+1==t.size())continue; sz=v; have=true; break;
+  }
+  if(!have) return false; r.size=sz; return true;
+}
+inline bool oec_parse_list_record_pipe(const std::string& rawline, OecJsonFileRecord& r) {
+  const std::string line=oec_strip_ansi_copy(rawline); const size_t bar=line.find('|'); if(bar==std::string::npos)return false;
+  const std::string left=oec_trim_copy(line.substr(0,bar)); std::string right=oec_trim_copy(line.substr(bar+1)); if(right.empty())return false;
+  const char status=right[0]; if(status!='+'&&status!='-'&&status!='#'&&status!='=')return false; right=oec_trim_copy(right.substr(1)); if(right.empty()||right=="?")return false;
+  r.path=right; r.status=status; r.ratio_percent=-1; r.version=0; r.size=0; r.attributes.clear(); r.modified.clear();
+  if(left.find("deleted/inacessible")==0 || left.find("deleted/inaccessible")==0) {
+    const std::vector<std::string> t=oec_split_ws(left); for(size_t i=t.size();i>0;--i){uint64_t v=0;if(oec_parse_u64_digits(t[i-1],v)){r.version=v;break;}}
+    r.type="file"; return true;
+  }
+  if(!oec_parse_metadata_left(left,r)) return false; oec_finish_record_type(r); return true;
+}
+inline bool oec_parse_list_record_plain(const std::string& rawline, OecJsonFileRecord& r) {
+  std::string s=oec_trim_copy(oec_strip_ansi_copy(rawline)); if(s.empty())return false; char status='+';
+  if((s[0]=='-'||s[0]=='+'||s[0]=='='||s[0]=='#') && s.size()>1 && (s[1]==' '||s[1]=='\t')) { status=s[0]; s=oec_trim_copy(s.substr(1)); }
+  const std::vector<OecTokSpan> ts=oec_split_ws_spans(s); if(ts.size()<4)return false;
+  size_t di=ts.size(),ti=ts.size(); for(size_t i=0;i<ts.size();++i)if(oec_looks_date(ts[i].s)){di=i;if(i+1<ts.size()&&oec_looks_time(ts[i+1].s))ti=i+1;break;} if(di==ts.size())return false;
+  size_t begin=ti<ts.size()?ti+1:di+1, attri=ts.size(), sizei=ts.size(), ratioi=ts.size(), veri=ts.size();
+  for(size_t i=begin;i<ts.size();++i) if(oec_looks_attr_token(ts[i].s)){attri=i;break;}
+  if(attri<ts.size()) { uint64_t z=0; if(attri+1<ts.size()&&oec_parse_grouped_u64(ts[attri+1].s,z))sizei=attri+1; else if(attri>begin&&oec_parse_grouped_u64(ts[attri-1].s,z))sizei=attri-1; }
+  if(sizei==ts.size()) for(size_t i=begin;i<ts.size();++i){uint64_t z=0;if(i!=attri&&oec_parse_grouped_u64(ts[i].s,z)){sizei=i;break;}}
+  for(size_t i=begin;i<ts.size();++i) if(!ts[i].s.empty()&&ts[i].s[ts[i].s.size()-1]=='%') ratioi=i;
+  for(size_t i=ts.size();i>begin;--i){uint64_t z=0;if(i-1!=attri&&oec_parse_u64_digits(ts[i-1].s,z)){veri=i-1;break;}}
+  size_t last=begin; if(attri<ts.size())last=std::max(last,attri);if(sizei<ts.size())last=std::max(last,sizei);if(ratioi<ts.size())last=std::max(last,ratioi);if(veri<ts.size()&&veri>last)last=veri;
+  if(last+1>=ts.size())return false; r.path=oec_trim_copy(s.substr(ts[last+1].a)); if(r.path.empty())return false; r.status=status;
+  std::string left=s.substr(0,ts[last].b); if(!oec_parse_metadata_left(left,r))return false; oec_finish_record_type(r); return true;
+}
 inline void oec_parse_file_list(const std::string& text, std::vector<OecJsonFileRecord>& files) {
-  files.clear(); size_t pos=0;
-  while(pos<text.size()) {
-    size_t end=text.find('\n',pos); if(end==std::string::npos) end=text.size();
-    std::string line=text.substr(pos,end-pos); if(!line.empty() && line[line.size()-1]=='\r') line.resize(line.size()-1);
-    OecJsonFileRecord r;
-    if(oec_parse_list_record_pipe(line,r) || oec_parse_list_record_legacy(line,r)) files.push_back(r);
-    pos=end<text.size()?end+1:end;
-  }
+  files.clear(); size_t pos=0; while(pos<text.size()) { size_t end=text.find('\n',pos);if(end==std::string::npos)end=text.size();std::string line=text.substr(pos,end-pos);if(!line.empty()&&line[line.size()-1]=='\r')line.resize(line.size()-1);OecJsonFileRecord r;if(oec_parse_list_record_pipe(line,r)||oec_parse_list_record_plain(line,r))files.push_back(r);pos=end<text.size()?end+1:end; }
 }
-
+inline void oec_collapse_current_records(std::vector<OecJsonFileRecord>& files) {
+  std::map<std::string,OecJsonFileRecord> cur; for(size_t i=0;i<files.size();++i){std::string k=oec_norm_relpath(files[i].path);if(k.empty())continue;std::map<std::string,OecJsonFileRecord>::iterator it=cur.find(k);if(it==cur.end()||files[i].version>=it->second.version)cur[k]=files[i];}
+  files.clear(); for(std::map<std::string,OecJsonFileRecord>::const_iterator it=cur.begin();it!=cur.end();++it)if(it->second.status!='-')files.push_back(it->second);
+}
 inline std::string oec_json_escape(const std::string& s) {
   static const char* hex="0123456789abcdef";
   std::string out; out.reserve(s.size()+16);
@@ -1268,10 +1304,17 @@ inline int oec_json_command(int argc, const char* const* argv) {
     if(rc!=0){std::fprintf(stderr,"oec_json: native terse list failed rc=%d%s%s\n",rc,caperr.empty()?"":" (",caperr.empty()?"":caperr.c_str());return 5;}
     oec_strip_auth_chatter(listing); files.clear(); oec_parse_file_list(listing,files); source_kind="zero-part-terse";
   }
+  if(files.empty() && listing.find("0 files") == std::string::npos && listing.find("0 file") == std::string::npos) {
+    // zpaqfranz -terse is not a stable machine format. Retry with -all, whose |status/version layout
+    // is historically the most explicit, then collapse all versions/deletions to current state.
+    std::vector<std::string> args; args.push_back("l"); args.push_back(layout.index); args.push_back("-all"); args.push_back("-terse"); args.push_back("-nocolor"); args.insert(args.end(),auth.begin(),auth.end());
+    std::string all_listing,caperr; int rc=spawn_self_capture(exe,args,all_listing,caperr,"oec_json native l -all -terse");
+    if(rc==0){oec_strip_auth_chatter(all_listing);std::vector<OecJsonFileRecord> all;oec_parse_file_list(all_listing,all);if(!all.empty()){oec_collapse_current_records(all);files.swap(all);listing.swap(all_listing);source_kind="zero-part-all-terse";}}
+  }
   if(files.empty()) {
-    // Empty archives are valid, but a non-empty native output with no recognized records likely means format drift.
     if(listing.find("0 files") == std::string::npos && listing.find("0 file") == std::string::npos) {
-      std::fprintf(stderr,"oec_json: could not parse file records from zpaqfranz list output; JSON was not created\n"); return 6;
+      std::fprintf(stderr,"oec_json: could not parse file records from zpaqfranz list output after terse + all-terse fallbacks; JSON was not created\n");
+      std::fprintf(stderr,"oec_json: hint: run native 'l <zero-part> -all -terse -nocolor' to inspect the local output layout\n"); return 6;
     }
   }
   if(force_md5) {

@@ -113,9 +113,22 @@ int zpaq_main_internal(int argc, const char** argv) {
     if(arc.find('?')!=std::string::npos) { std::fprintf(stderr,"fake metadata command was given multipart pattern\n"); return 20; }
     if(!ex(arc)) return 21;
     if(cmd=="l") {
+      const char* fl=std::getenv("FAKE_LIST_LAYOUT"); std::string layout=fl?fl:"pipe"; bool all=false; for(int ai=3;ai<argc;++ai)if(std::string(argv[ai])=="-all")all=true;
       std::printf("<<%s>>: 1 versions, 2 files, 1.234 bytes\n",arc.c_str());
-      std::printf("2026-08-31 12:34:56 0644 1.234 87%% 0001|+ folder/file one.txt\n");
-      std::printf("2026-08-31 12:35:00 d0755 0 0%% 0001|+ folder/subdir\n");
+      if(layout=="plain") {
+        std::printf("2026/08/31 123456 0644 1,234 87%% 1 folder/file one.txt\n");
+        std::printf("2026/08/31 123500 d0755 0 0%% 1 folder/subdir\n");
+      } else if(layout=="allonly" && !all) {
+        std::printf("CURRENT-LIST-LAYOUT-UNKNOWN folder/file one.txt\n");
+      } else if(layout=="allonly") {
+        std::printf("2026-08-30 10:00:00 0644 100 90%% 1|+ folder/obsolete.txt\n");
+        std::printf("deleted/inacessible 0 del 2|- folder/obsolete.txt\n");
+        std::printf("2026-08-31 12:34:56 0644 1.234 87%% 3|+ folder/file one.txt\n");
+        std::printf("2026-08-31 12:35:00 d0755 0 0%% 3|+ folder/subdir\n");
+      } else {
+        std::printf("2026-08-31 12:34:56 0644 1.234 87%% 0001|+ folder/file one.txt\n");
+        std::printf("2026-08-31 12:35:00 d0755 0 0%% 0001|+ folder/subdir\n");
+      }
     } else {
       std::printf("fake i metadata from %s\n",arc.c_str());
     }

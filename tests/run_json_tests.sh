@@ -133,3 +133,28 @@ cp 'folder/file one.txt' 'createforce/folder/file one.txt'
 grep -Fq 'oec_a: JSON updated forced.json' forced.out
 
 echo 'OEC JSON MD5/PROGRESSIVE TESTS PASS'
+
+# Parser drift regressions: plain/slash+compact-date layout and -all fallback.
+cp aaa.001 layoutplain.zpaq
+FAKE_LIST_LAYOUT=plain ./zpaqfranz oec_init layoutplain.zpaq --no-idx --ec-data 16 --ec-stripes 8 >/dev/null
+FAKE_LIST_LAYOUT=plain ./zpaqfranz oec_json layoutplain.zpaq --no-idx > layoutplain.out
+python3 - <<'PY'
+import json
+j=json.load(open('layoutplain.json',encoding='utf-8'))
+assert j['file_count']==2
+f=next(x for x in j['files'] if x['path']=='folder/file one.txt')
+assert f['size']==1234 and f['modified']=='2026-08-31T12:34:56'
+PY
+
+cp aaa.001 layoutall.zpaq
+FAKE_LIST_LAYOUT=allonly ./zpaqfranz oec_init layoutall.zpaq --no-idx --ec-data 16 --ec-stripes 8 >/dev/null
+FAKE_LIST_LAYOUT=allonly ./zpaqfranz oec_json layoutall.zpaq --no-idx > layoutall.out
+python3 - <<'PY'
+import json
+j=json.load(open('layoutall.json',encoding='utf-8'))
+assert j['metadata_source']=='zero-part-all-terse'
+assert sorted(x['path'] for x in j['files'])==['folder/file one.txt','folder/subdir']
+assert all(x['path']!='folder/obsolete.txt' for x in j['files'])
+PY
+
+echo 'OEC JSON FORMAT-DRIFT TESTS PASS'

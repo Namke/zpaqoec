@@ -1,4 +1,4 @@
-# zpaqoec 0.3.5
+# zpaqoec 0.3.6
 
 **OEC = Optimize + Error Correction.**
 
@@ -33,7 +33,7 @@ Original zpaqfranz commands (`a`, `l`, `i`, `x`, `e`, ...) remain available unch
 
 Run `zpaqoec` with no parameters for quick help. Full OEC usage is in [`docs/OEC_COMMANDS.md`](docs/OEC_COMMANDS.md).
 
-| Command | Role | `.idx` behavior in 0.3.5 |
+| Command | Role | `.idx` behavior in 0.3.6 |
 |---|---|---|
 | `oecinit` / `oec_init` | retrofit existing single or multipart archive with `.000` + EC | builds/reuses `.idx` for unencrypted metadata; encrypted `.000` skips plaintext IDX unless `--idx-plaintext` |
 | `oec_a` | incremental add through `.000` + EC | maintains cache lifecycle; `--idx-refresh` refreshes immediately |
@@ -68,11 +68,11 @@ A valid `.idx` list view is consumed via mmap when possible; otherwise OEC perfo
 
 ### Current acceleration boundary
 
-0.3.5 implements a real mmap-backed cache for the **default metadata views** used by `oec_l` and `oec_i`. On a valid cache hit, these commands do not invoke the native parser for `.000`.
+0.3.6 implements a real mmap-backed cache for the **default metadata views** used by `oec_l` and `oec_i`. On a valid cache hit, these commands do not invoke the native parser for `.000`.
 
 Option-rich forms such as `oec_l compress -all` still call the native `.000` parser so upstream filtering/version semantics remain exact.
 
-`oec_a` still delegates deduplication to upstream `Jidac`. Therefore 0.3.5 does **not** claim that the full fragment/file state has moved out of RAM. The cache file/lifecycle and mmap layer are ready for the deeper HT/DT backend, but correctness takes priority over replacing upstream dedup structures prematurely.
+`oec_a` still delegates deduplication to upstream `Jidac`. Therefore 0.3.6 does **not** claim that the full fragment/file state has moved out of RAM. The cache file/lifecycle and mmap layer are ready for the deeper HT/DT backend, but correctness takes priority over replacing upstream dedup structures prematurely.
 
 Likewise `oec_x/oec_e` still let upstream decode multipart payload. The cache is validated and available, but fragment-to-part direct seeking is not claimed yet.
 
@@ -158,7 +158,7 @@ Precedence is: explicit `-key`/`-franzen` > existing `FRANZKEY` > `PASSWORD_FOLD
 
 ### AES-encrypted archives and IDX
 
-The `.idx` v1 payload contains materialized `l`/`i` metadata in plaintext. Therefore OEC 0.3.5 does **not** create or automatically use a plaintext `.idx` when the authoritative `.000` is standard AES-encrypted. `oecinit` still completes after producing the payload EC, encrypted `.000`, and `.000.ec`.
+The `.idx` v1 payload contains materialized `l`/`i` metadata in plaintext. Therefore OEC 0.3.6 does **not** create or automatically use a plaintext `.idx` when the authoritative `.000` is standard AES-encrypted. `oecinit` still completes after producing the payload EC, encrypted `.000`, and `.000.ec`.
 
 To explicitly allow a plaintext SSD cache:
 
@@ -267,7 +267,7 @@ zpaqoec oec_x compress path/to/file -to restore
 zpaqoec oec_e compress path/to/file
 ```
 
-`.000` contains metadata but deliberately omits compressed D blocks, so payload still comes from normal data parts. 0.3.5 does not yet bypass upstream multipart extraction with a fragment locator backend.
+`.000` contains metadata but deliberately omits compressed D blocks, so payload still comes from normal data parts. 0.3.6 does not yet bypass upstream multipart extraction with a fragment locator backend.
 
 ## EC commands
 
@@ -309,7 +309,7 @@ Current identity:
 
 ```text
 zpaqoec oec_version
-zpaqoec OEC overlay 0.3.5 (Optimize + Error Correction)
+zpaqoec OEC overlay 0.3.6 (Optimize + Error Correction)
 ```
 
 ## Tests
@@ -324,3 +324,8 @@ g++ -std=c++11 -O2 src/zfec_cli.cpp -o zfec
 ./tests/run_idx_tests.sh
 ./tests/run_windows_script_static_tests.sh
 ```
+
+
+### zpaqfranz list-format compatibility
+
+0.3.6 accepts multiple `-terse` layouts and falls back to `-all -terse` + current-state collapse when necessary.
