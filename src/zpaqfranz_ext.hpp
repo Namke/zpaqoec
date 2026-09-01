@@ -20,6 +20,7 @@
 namespace zfext {
 
 static const int kNotHandled = -777777;
+static const char* const kOecOverlayVersion = "0.2.4";
 
 inline std::string zero_suffix(uint64_t n, uint32_t digits) {
   std::ostringstream s; s << std::setw(static_cast<int>(digits)) << std::setfill('0') << n; return s.str();
@@ -477,6 +478,7 @@ inline void oec_quick_help(const char* exe) {
     "  oec_x ARCHIVE [files/options]   OEC equivalent of native x\n"
     "  oec_e ARCHIVE [files/options]   OEC equivalent of native e\n"
     "  ec create|verify|repair|info    independent EC sidecar operations\n"
+    "  oec_version                    show OEC overlay version/build identity\n"
     "\n"
     "Examples:\n"
     "  %s oecinit \"backup.???\"\n"
@@ -494,6 +496,7 @@ inline int dispatch_const(int argc, const char* const* argv) {
   if (argc < 2 || !argv[1]) { oec_quick_help(argc > 0 ? argv[0] : 0); return 0; }
   const std::string cmd=argv[1];
   if (cmd=="oec_help" || cmd=="oec_h") { oec_quick_help(argv[0]); return 0; }
+  if (cmd=="oec_version") { std::fprintf(stdout, "zpaqoec OEC overlay %s (Optimize + Error Correction)\n", kOecOverlayVersion); return 0; }
   if (cmd=="ec") return zfec::cli(argc-1, argv+1);
   if (cmd=="oec_a") return oec_a(argc, argv);
   if (cmd=="oecinit" || cmd=="oec_init") return oecinit(argc, argv);

@@ -334,3 +334,34 @@ oec_e  -> file/fragment/part lookup acceleration
 ```
 
 Deleting or losing `.idx` must never make the archive unrecoverable; it will be rebuildable from `.000`.
+
+
+## Build identity / diagnostics
+
+```text
+zpaqoec oec_version
+```
+
+Expected for this release:
+
+```text
+zpaqoec OEC overlay 0.2.4 (Optimize + Error Correction)
+```
+
+Run with no parameters for the OEC quick command reference:
+
+```text
+zpaqoec
+```
+
+Both initialization spellings are accepted:
+
+```text
+zpaqoec oecinit  "archive.???"
+zpaqoec oec_init "archive.???"
+```
+
+On Windows, when testing a newly built version, prefer the exact build path or
+use `build-windows.ps1 -InstallTo ...`. A different `zpaqoec.exe` earlier in
+PATH/current directory can otherwise make an old binary look like a dispatcher
+failure.

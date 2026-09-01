@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.2.4
+
+- Fix Windows runtime smoke harness: the function parameter was named `$Args`, colliding with PowerShell's automatic `$args` variable. As a result every smoke invocation could execute the binary with no arguments; `oec_h` falsely passed because no-arg also prints help, while `oec_version` exposed the bug.
+- Rename the smoke parameter to `$CommandArgs` and use named parameter binding for every probe.
+- Add an argument-sensitive `oecinit` smoke probe that expects exit code 2 plus OEC-specific usage text, proving argv reaches the OEC dispatcher.
+- No archive format, EC format, or OEC command semantics changed.
+
+## 0.2.3
+
+- Fix MinGW build regression in the 0.2.2 multi-entry dispatcher injector.
+- Signature-aware hook injection: `int main()` entry points without `argc/argv` are now skipped instead of receiving an invalid bridge call.
+- All `zpaq_main_internal(int argc, ... argv)` definitions are still instrumented, covering platform-conditional Windows/Linux parser entries.
+- Repatching a source partially patched by 0.2.2 removes the bad hook and reinjects only eligible entry points; no clean upstream checkout is required.
+- Injector regression now includes a no-argument `main()` decoy and multiple conditional internal entries.
+- Windows/Linux runtime smoke gates remain mandatory and verify OEC dispatch before the build is reported successful.
+
+## 0.2.2
+
+- Fix OEC dispatch placement across platform-specific outer `main()` paths.
+- Add lightweight forward-declared bridge so OEC is intercepted before upstream unknown-command validation without moving heavy headers before platform setup.
+- Keep secondary dispatch in `zpaq_main_internal()` for common internal entry coverage.
+- Add `oec_version` build identity command.
+- Windows build now has mandatory post-build runtime smoke gates for no-arg help, `oec_h`, and `oec_version`.
+- Windows build warns when bare `zpaqoec.exe` resolves to a different/stale binary and supports explicit `-InstallTo`.
+- Linux build also performs OEC runtime smoke gates.
+- Harden injector function matching so comments mentioning `int main()` cannot be mistaken for function definitions.
+- Add/refresh OEC command documentation.
+
 ## 0.2.1
 
 - Fixed Windows OEC command dispatch by moving the injected hook from the first textual `main()` to upstream `zpaq_main_internal()`, the common command entry used by the monolithic source.

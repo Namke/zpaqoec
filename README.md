@@ -213,3 +213,48 @@ g++ -std=c++11 -O2 src/zfec_cli.cpp -o zfec
 ./tests/run_oecinit_tests.sh
 ./tests/run_oec_command_tests.sh
 ```
+
+
+## Windows dispatcher verification (0.2.2+)
+
+The Windows build is not considered successful merely because MinGW produced an
+`.exe`. The build script now executes the freshly built binary and requires all
+of these runtime gates to pass:
+
+```powershell
+zpaqoec.exe            # must print OEC quick help
+zpaqoec.exe oec_h      # must print OEC quick help
+zpaqoec.exe oec_version
+# zpaqoec OEC overlay 0.2.4 (Optimize + Error Correction)
+```
+
+The injector uses a lightweight forward-declared OEC bridge at executable entry.
+Only entry signatures that actually expose both `argc` and `argv` are
+instrumented; platform-specific `int main()` definitions with no parameters are
+left untouched. Every eligible `zpaq_main_internal(...)` definition is
+instrumented, so conditional Windows/Linux parser branches are covered.
+
+The heavy extension include and bridge implementation are appended at EOF,
+after zpaqfranz's platform compatibility code and outside conditional entry
+branches. This avoids both MinGW/UCRT include-order conflicts and a bridge being
+compiled only on the wrong platform branch.
+
+The default Windows output is the repository build file, for example:
+
+```text
+W:\Works\Github\zpaqoec\build\zpaqoec.exe
+```
+
+If a bare `zpaqoec.exe` resolves to another copy such as
+`C:\Programs\zpaqoec.exe`, the build script prints a warning. Test the exact
+fresh build by full path or install it explicitly:
+
+```powershell
+.\scripts\build-windows.ps1 `
+  -Compiler 'C:\Programs\msys64\ucrt64\bin\g++.exe' `
+  -InstallTo 'C:\Programs\zpaqoec.exe'
+```
+
+### Windows runtime smoke gate (0.2.4)
+
+`build-windows.ps1` validates the freshly built executable with no-arg help, `oec_h`, `oec_version`, and an argument-sensitive `oecinit` usage probe. The latter must return exit code 2 and print OEC initialization usage, so the build cannot pass merely because no-arg help happens to contain a common banner.

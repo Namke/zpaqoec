@@ -6,7 +6,9 @@ rm -rf "$TMP"; mkdir -p "$TMP/extensions"
 cp "$ROOT/tests/fake_upstream.cpp" "$TMP/fake.cpp"
 python3 "$ROOT/scripts/apply_to_upstream.py" "$TMP/fake.cpp" --extension-dir "$TMP/extensions" >/dev/null
 # idempotence
-python3 "$ROOT/scripts/apply_to_upstream.py" "$TMP/fake.cpp" --extension-dir "$TMP/extensions" | grep -q 'already patched'
+python3 "$ROOT/scripts/apply_to_upstream.py" "$TMP/fake.cpp" --extension-dir "$TMP/extensions" >/dev/null
+[[ $(grep -c 'ZPAQOEC_BRIDGE_DECL' "$TMP/fake.cpp") -eq 1 ]]
+[[ $(grep -c '^#include "extensions/zpaqfranz_ext.hpp"$' "$TMP/fake.cpp") -eq 1 ]]
 g++ -std=c++11 -O2 "$TMP/fake.cpp" -o "$TMP/zpaqfranz"
 cd "$TMP"
 ./zpaqfranz oec_a compress dummy-source --ec-data 16 --ec-stripes 8 >/dev/null

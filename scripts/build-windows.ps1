@@ -1,7 +1,8 @@
 param(
   [string]$Upstream = "$PSScriptRoot\..\upstream\zpaqfranz.cpp",
   [string]$Out = "$PSScriptRoot\..\build\zpaqoec.exe",
-  [string]$Compiler = ""
+  [string]$Compiler = "",
+  [string]$InstallTo = ""
 )
 $ErrorActionPreference = 'Stop'
 $Root = (Resolve-Path "$PSScriptRoot\..").Path
@@ -194,5 +195,78 @@ log:      $CompileLog
 }
 
 if (-not (Test-Path -LiteralPath $Out)) { throw "compiler returned success but output is missing: $Out" }
-Write-Host "built: $Out"
+$BuiltExe = (Resolve-Path -LiteralPath $Out).Path
+Write-Host "built: $BuiltExe"
 Write-Host "compile log: $CompileLog"
+
+# Mandatory runtime smoke gate. A successful compile is not enough: the final
+# Windows executable must actually intercept OEC commands before upstream's
+# unknown-command/help parser. This catches wrong entry-point injection.
+function Assert-OecOutput([string]$Label, [string[]]$CommandArgs, [string]$Needle, [int]$ExpectedExit = 0) {
+  $OldEap2 = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $lines = @(& $BuiltExe @CommandArgs 2>&1)
+    $rc = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $OldEap2
+  }
+  $text = (($lines | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine)
+  if ($rc -ne $ExpectedExit -or $text -notlike "*$Needle*") {
+    throw @"
+OEC runtime smoke test FAILED: $Label
+  exe:      $BuiltExe
+  exit:     $rc (expected $ExpectedExit)
+  expected: $Needle
+  output:
+$text
+The binary compiled, but the OEC dispatcher is not on the executable command path.
+"@
+  }
+  Write-Host "smoke PASS: $Label"
+}
+
+Assert-OecOutput -Label 'no-arg OEC help' -CommandArgs @() -Needle 'OEC (Optimize + Error Correction)'
+Assert-OecOutput -Label 'oec_h dispatcher' -CommandArgs @('oec_h') -Needle 'OEC (Optimize + Error Correction)'
+Assert-OecOutput -Label 'oec_version dispatcher' -CommandArgs @('oec_version') -Needle 'zpaqoec OEC overlay 0.2.4'
+# Argument-sensitive smoke: this must reach the oecinit parser (not no-arg help).
+# Missing ARCHIVE is expected to return 2 and print oecinit usage.
+Assert-OecOutput -Label 'oecinit argv dispatch' -CommandArgs @('oecinit') -Needle 'Initialize/retrofit OEC archive' -ExpectedExit 2
+
+# Make stale/shadowed copies obvious. The freshly built executable is normally
+# under repo\\build; invoking bare `zpaqoec.exe` elsewhere may run an older copy.
+try {
+  $Cmd = Get-Command zpaqoec.exe -CommandType Application -ErrorAction Stop
+  $ResolvedCommand = $Cmd.Source
+  if ([string]::IsNullOrWhiteSpace($ResolvedCommand)) { $ResolvedCommand = $Cmd.Path }
+  if (-not [string]::IsNullOrWhiteSpace($ResolvedCommand)) {
+    $ResolvedCommand = (Resolve-Path -LiteralPath $ResolvedCommand).Path
+    if ($ResolvedCommand -ne $BuiltExe) {
+      Write-Warning "Bare 'zpaqoec.exe' currently resolves to a DIFFERENT file: $ResolvedCommand"
+      Write-Warning "Fresh build is: $BuiltExe"
+      Write-Warning "Run the fresh build by full path, copy/install it, or use -InstallTo."
+    }
+  }
+} catch {}
+
+if (-not [string]::IsNullOrWhiteSpace($InstallTo)) {
+  $InstallParent = Split-Path -Parent $InstallTo
+  if (-not [string]::IsNullOrWhiteSpace($InstallParent)) {
+    New-Item -ItemType Directory -Force -Path $InstallParent | Out-Null
+  }
+  Copy-Item -LiteralPath $BuiltExe -Destination $InstallTo -Force
+  $Installed = (Resolve-Path -LiteralPath $InstallTo).Path
+  Write-Host "installed: $Installed"
+  # Validate the copied binary too.
+  $SavedBuilt = $BuiltExe
+  $BuiltExe = $Installed
+  try {
+    Assert-OecOutput -Label 'installed oec_version dispatcher' -CommandArgs @('oec_version') -Needle 'zpaqoec OEC overlay 0.2.4'
+  } finally {
+    $BuiltExe = $SavedBuilt
+  }
+}
+
+Write-Host "OEC Windows build verified. Test with:"
+Write-Host "  & '$BuiltExe' oec_version"
+Write-Host "  & '$BuiltExe' oec_h"

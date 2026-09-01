@@ -1,2 +1,5 @@
 /upstream
 /build
+/tests/oec-a-test-run
+/tests/oec-command-test-run
+/tests/oecinit-test-run

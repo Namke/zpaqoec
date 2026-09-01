@@ -19,10 +19,19 @@ static void log_call(int argc, const char* const* argv) {
   std::fprintf(f,"\n"); fclose(f);
 }
 
-// Deliberate decoy: the 0.2.0 injector targeted the first textual int main(),
-// which is unsafe in a platform-conditional monolith.
+// Deliberate decoys: real zpaqfranz has platform-conditional entry points.
+// A no-argument main must NEVER receive an argc/argv bridge call.
+#if 0
+int main() { return 98; }
+#endif
+// Parameterized mains are eligible even when conditionally compiled out.
 #if 0
 int main(int argc, char** argv) { return 99; }
+#endif
+// Multiple internal parser definitions may exist in conditional branches; all
+// eligible textual definitions should be instrumented.
+#if 0
+int zpaq_main_internal(int argc, const char** argv) { return argc + (argv ? 90 : 0); }
 #endif
 
 int zpaq_main_internal(int argc, const char** argv) {
