@@ -1,3 +1,11 @@
+# Changelog
+
+## 0.1.2
+
+- Fix Windows/MinGW build when patched `zpaqfranz.cpp` is compiled by absolute path: build scripts now pass the upstream source directory explicitly with `-I`, so `#include "extensions/zpaqfranz_ext.hpp"` resolves reliably.
+- Normalize the upstream source path before compiling and verify that the injected extension header actually exists.
+- Apply the same explicit include-root behavior to Linux builds for consistency.
+
 # 0.1.1
 
 - Added `trunkinit` to retrofit existing multipart ZPAQ archives.
