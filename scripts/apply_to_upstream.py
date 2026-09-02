@@ -145,32 +145,143 @@ def find_function_body_range(text: str, pattern: str):
         i+=1
     return None
 
+def find_jidac_add_ranges(text: str):
+    """Return textual Jidac::add(...) definitions, tolerating signature drift.
+
+    zpaqfranz is a single translation unit and upstream has refactored add()
+    repeatedly.  Do not key the deep hook to an exact no-argument signature.
+    We only accept a candidate when a function body opens before any ';'.
+    """
+    out=[]
+    for m in re.finditer(r'(?m)^[ \t]*[^\n;{}]*\bJidac::add\s*\(', text):
+        line_start=m.start()
+        par=text.find('(', m.start())
+        if par < 0:
+            continue
+        depth=0; in_str=False; in_chr=False; esc=False; i=par
+        while i < len(text):
+            c=text[i]
+            if in_str:
+                if esc: esc=False
+                elif c=='\\': esc=True
+                elif c=='"': in_str=False
+            elif in_chr:
+                if esc: esc=False
+                elif c=='\\': esc=True
+                elif c=="'": in_chr=False
+            else:
+                if c=='"': in_str=True
+                elif c=="'": in_chr=True
+                elif c=='(': depth+=1
+                elif c==')':
+                    depth-=1
+                    if depth==0:
+                        break
+            i+=1
+        if depth != 0:
+            continue
+        semi=text.find(';', i+1)
+        brace=text.find('{', i+1)
+        if brace < 0 or (semi >= 0 and semi < brace):
+            continue
+        # Match the complete function body using the existing brace scanner.
+        r=find_function_body_range(text, re.escape(text[line_start:brace]).replace(r'\\ ', r'[ \\t]+'))
+        if r:
+            out.append(r)
+            continue
+        # Fallback body scan when the signature contains unusual whitespace.
+        d=0; in_str=False; in_chr=False; esc=False; j=brace
+        while j < len(text):
+            c=text[j]
+            if in_str:
+                if esc: esc=False
+                elif c=='\\': esc=True
+                elif c=='"': in_str=False
+            elif in_chr:
+                if esc: esc=False
+                elif c=='\\': esc=True
+                elif c=="'": in_chr=False
+            else:
+                if c=='"': in_str=True
+                elif c=="'": in_chr=True
+                elif c=='{': d+=1
+                elif c=='}':
+                    d-=1
+                    if d==0:
+                        out.append((line_start,brace,j+1)); break
+            j+=1
+    # De-duplicate candidates that a permissive regexp found twice.
+    dedup=[]; seen=set()
+    for r in out:
+        if r[0] not in seen:
+            seen.add(r[0]); dedup.append(r)
+    return dedup
+
+
+def inject_commit_before_final_return(body: str):
+    """Insert commit before the final return in the add() body.
+
+    We intentionally do not hard-code `return errors;`: upstream has renamed
+    locals across revisions.  The final return is the normal completed path;
+    exceptions/aborts still do not publish the active IDX generation.
+    """
+    matches=list(re.finditer(r'(?m)^([ \t]*)return\b[^;]*;', body))
+    if not matches:
+        return body,0
+    # Prefer the historical authoritative success return when present.
+    preferred=[m for m in matches if re.search(r'\breturn\s+errors\s*;', m.group(0))]
+    m=preferred[-1] if preferred else matches[-1]
+    indent=m.group(1)
+    hook=indent+'/* ZPAQOEC_DEEP_COMMIT */ htinv.commit();\n'
+    return body[:m.start()]+hook+body[m.start():],1
+
+
 def patch_deep_jidac(text: str):
-    # Remove previous deep include/hooks for idempotence.
+    # Remove previous deep include/hooks for idempotence.  Revert only the
+    # declaration token, preserving upstream constructor arguments verbatim.
     text=re.sub(r'(?m)^[ \t]*#include[ \t]+"extensions/oec_deep\.hpp"[ \t]*(?:\r?\n|$)','',text)
-    text=text.replace('/* ZPAQOEC_DEEP_COMMIT */ htinv.commit();','')
-    text=text.replace('OecHybridHTIndex htinv(', 'HTIndex htinv(')
-    r=find_function_body_range(text,r'(?m)^[ \t]*int[ \t]+Jidac::add[ \t]*\([ \t]*\)')
-    if not r: return text,0
-    start,brace,end=r
-    body=text[start:end]
-    old='HTIndex htinv(ht, ht.size()+(total_size>>(10+fragment))+vf.size());'
-    if old not in body:
-        # tolerate whitespace while requiring the exact constructor shape
-        mm=re.search(r'HTIndex\s+htinv\s*\(\s*ht\s*,\s*ht\.size\(\)\s*\+\s*\(total_size>>\(10\+fragment\)\)\s*\+\s*vf\.size\(\)\s*\)\s*;',body)
-        if not mm: return text,0
-        body=body[:mm.start()]+'OecHybridHTIndex htinv(ht, ht.size()+(total_size>>(10+fragment))+vf.size());'+body[mm.end():]
-    else:
-        body=body.replace(old,'OecHybridHTIndex htinv(ht, ht.size()+(total_size>>(10+fragment))+vf.size());',1)
-    # Commit only on normal return path(s) from Jidac::add.
-    body,n=re.subn(r'(?m)^([ \t]*)return\s+errors\s*;',r'\1/* ZPAQOEC_DEEP_COMMIT */ htinv.commit();\n\1return errors;',body)
-    if n==0: return text,0
-    text=text[:start]+body+text[end:]
-    # Include after HTIndex definition but immediately before Jidac::add().
-    pos=text.find(body[:min(len(body),80)])
-    if pos<0: pos=start
-    text=text[:pos]+'#include "extensions/oec_deep.hpp"\n'+text[pos:]
-    return text,1
+    text=re.sub(r'(?m)^[ \t]*/\* ZPAQOEC_DEEP_COMMIT \*/[ \t]*htinv\.commit\(\);[ \t]*(?:\r?\n|$)','',text)
+    text=re.sub(r'\bOecHybridHTIndex(?=\s+htinv\s*\()', 'HTIndex', text)
+
+    ranges=find_jidac_add_ranges(text)
+    if not ranges:
+        return text,0
+
+    patched=0
+    include_pos=None
+    # Patch backwards so source offsets remain stable.  In normal 64.x there
+    # is one add() definition, but tolerate platform/feature variants.
+    for start,brace,end in reversed(ranges):
+        body=text[start:end]
+        # Semantic anchor: the native inverse hash index named htinv.  Replace
+        # ONLY the type token; do not rewrite argument expressions from upstream.
+        mm=re.search(r'\bHTIndex(?=\s+htinv\s*\()', body)
+        if not mm:
+            continue
+        body=body[:mm.start()]+'OecHybridHTIndex'+body[mm.end():]
+        body,n=inject_commit_before_final_return(body)
+        if not n:
+            continue
+        text=text[:start]+body+text[end:]
+        include_pos=start
+        patched+=1
+
+    if patched==0:
+        return text,0
+
+    # Re-locate the first patched add() after edits and include immediately
+    # before it. HT/HTIndex are therefore already defined, while the adapter is
+    # visible at the replacement declaration.
+    first=text.find('OecHybridHTIndex')
+    if first < 0:
+        return text,0
+    line=text.rfind('\n',0,first)+1
+    # Walk back to the Jidac::add signature rather than including inside body.
+    sig=text.rfind('Jidac::add',0,first)
+    if sig >= 0:
+        line=text.rfind('\n',0,sig)+1
+    text=text[:line]+'#include "extensions/oec_deep.hpp"\n'+text[line:]
+    return text,patched
 
 def main():
     ap = argparse.ArgumentParser(description='Inject OEC (Optimize + Error Correction) extension into zpaqfranz monolithic source')

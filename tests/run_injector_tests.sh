@@ -37,6 +37,29 @@ python3 "$ROOT/scripts/apply_to_upstream.py" "$TMP/fake.cpp" >/dev/null
 [[ $(grep -c 'ZPAQOEC_BRIDGE_DEF' "$TMP/fake.cpp") -eq 1 ]]
 [[ $(grep -c 'ZPAQFRANZ_OEC_DISPATCH' "$TMP/fake.cpp") -eq 4 ]]
 
+# Regression for zpaqfranz signature/constructor drift: deep patching must not
+# depend on exact `int Jidac::add()` spelling or the historical expected-size
+# expression.  Keep the native constructor arguments byte-for-byte.
+cp "$ROOT/tests/fake_upstream.cpp" "$TMP/drift.cpp"
+python3 - "$TMP/drift.cpp" <<'PYDRIFT'
+import pathlib,sys
+p=pathlib.Path(sys.argv[1]); t=p.read_text()
+t=t.replace('int add();', 'int add(bool compat);')
+t=t.replace('int Jidac::add() {', 'int Jidac::add(bool compat) {')
+t=t.replace('OecHybridHTIndex htinv(ht, ht.size()+(total_size>>(10+fragment))+vf.size());',
+            'OecHybridHTIndex   htinv ( ht, unsigned(ht.size() + vf.size() + 17) );')
+t=t.replace('return errors;', 'return compat ? errors : errors;', 1)
+p.write_text(t)
+PYDRIFT
+OUT=$(python3 "$ROOT/scripts/apply_to_upstream.py" "$TMP/drift.cpp")
+echo "$OUT" | grep -Fq 'OEC deep Jidac hook: 1'
+grep -Eq 'OecHybridHTIndex[[:space:]]+htinv[[:space:]]*\([[:space:]]*ht,[[:space:]]*unsigned\(ht\.size\(\)[[:space:]]*\+[[:space:]]*vf\.size\(\)[[:space:]]*\+[[:space:]]*17\)[[:space:]]*\)' "$TMP/drift.cpp"
+grep -Fq 'ZPAQOEC_DEEP_COMMIT' "$TMP/drift.cpp"
+# Re-patching the drift form remains idempotent.
+OUT=$(python3 "$ROOT/scripts/apply_to_upstream.py" "$TMP/drift.cpp")
+echo "$OUT" | grep -Fq 'OEC deep Jidac hook: 1'
+[[ $(grep -c 'ZPAQOEC_DEEP_COMMIT' "$TMP/drift.cpp") -eq 1 ]]
+
 g++ -std=c++11 -O2 "$TMP/fake.cpp" -o "$TMP/zpaqoec"
 "$TMP/zpaqoec" oec_h | grep -Fq 'OEC (Optimize + Error Correction)'
 "$TMP/zpaqoec" oec_version | grep -Fq 'zpaqoec OEC overlay 0.5.0'

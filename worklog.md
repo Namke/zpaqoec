@@ -1,3 +1,7 @@
+## 0.5.0 deep IDX injector hotfix r2
+
+Fixed the 64.8 build hard-gate false negative caused by exact-text matching of `Jidac::add()` and `HTIndex htinv(...)`. The injector and build gates now use semantic anchors and preserve upstream constructor syntax. Drift-fixture compile + OEC dispatcher smoke passes.
+
 ## 0.5.0 chunk compatibility + archive maintenance hotfix
 
 - `oec_a -chunk` now executes the untouched native chunk writer without `-index`, then derives `.000` in a separate transactional metadata pass.

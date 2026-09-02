@@ -21,3 +21,6 @@ grep -Fq 'struct _finddata_t fd' "$H"
 echo "WINDOWS CRT ENUMERATION STATIC TESTS PASS"
 
 grep -Fq 'EOC_TEMP' "$ROOT/src/zpaqfranz_ext.hpp"
+
+grep -Fq -- "-Pattern 'OecHybridHTIndex\\s+htinv\\s*\\(' -Quiet" "$P"
+grep -Fq "grep -Eq 'OecHybridHTIndex[[:space:]]+htinv[[:space:]]*\\('" "$ROOT/scripts/build-linux.sh"

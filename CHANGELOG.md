@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 deep IDX injector compatibility hotfix r2
+
+- Deep Jidac injector no longer hard-codes the exact `int Jidac::add()` signature or the historical `HTIndex htinv(...)` constructor expression.
+- The hook now locates any `Jidac::add(...)` definition, replaces only the semantic `HTIndex` type token for `htinv`, and preserves upstream constructor arguments verbatim.
+- Normal-path deep generation commit no longer depends on the local being named exactly `errors`; the final return is instrumented when the historical return is absent.
+- Windows/Linux build gates now accept whitespace/format drift around `OecHybridHTIndex htinv(...)`.
+- Added regression coverage for signature drift, constructor-expression drift, idempotent re-patching, and build/smoke on the drift fixture.
+
 ## 0.5.0 chunk/IDX/EC compatibility hotfix
 
 - Preserve native zpaqfranz `-chunk` archive-writing semantics. `oec_a ... -chunk` no longer injects `-index`; after the upstream add commits, OEC transactionally rebuilds `.000` with native `x -index`.
