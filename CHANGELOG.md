@@ -1,4 +1,10 @@
-## 0.4.1 - EOC_TEMP default IDX relocation
+# 0.4.2
+
+- Fix `oec_a` explicit multipart patterns such as `Documents?????.zpaq`; zero/next parts now resolve to `Documents00000.zpaq` / `Documents00001.zpaq` instead of appending `.000/.001` after the literal pattern.
+- Add OEC preflight for upstream `-chunk` + `-index` incompatibility. OEC now fails immediately with an actionable explanation instead of spawning zpaqfranz and failing late.
+- Preserve legacy bare-base multipart behavior.
+
+## 0.4.2 - EOC_TEMP default IDX relocation
 
 - Add `EOC_TEMP`: when non-empty, every automatically derived `.idx` path is relocated into that directory while preserving the existing archive-derived basename.
 - Keep precedence `--idx PATH` > `EOC_TEMP` > archive-local default.

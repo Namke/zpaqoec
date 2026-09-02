@@ -26,6 +26,6 @@ printf 'built: %s\n' "$OUT"
 # Runtime smoke gate: compile success alone does not prove the OEC dispatcher
 # is on the executable command path.
 "$OUT" oec_h | grep -Fq 'OEC (Optimize + Error Correction)'
-"$OUT" oec_version | grep -Fq 'zpaqoec OEC overlay 0.4.1'
+"$OUT" oec_version | grep -Fq 'zpaqoec OEC overlay 0.4.2'
 "$OUT" | grep -Fq 'OEC (Optimize + Error Correction)'
 printf 'smoke PASS: OEC dispatcher/no-arg/version\n'

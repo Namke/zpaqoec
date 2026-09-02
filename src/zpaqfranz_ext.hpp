@@ -34,7 +34,7 @@
 namespace zfext {
 
 static const int kNotHandled = -777777;
-static const char* const kOecOverlayVersion = "0.4.1";
+static const char* const kOecOverlayVersion = "0.4.2";
 
 inline std::string zero_suffix(uint64_t n, uint32_t digits) {
   std::ostringstream s; s << std::setw(static_cast<int>(digits)) << std::setfill('0') << n; return s.str();
@@ -257,6 +257,18 @@ inline uint64_t recover_last_part_by_names(const std::string& base, uint32_t dig
   uint64_t n=1;
   while(n<=maxn && path_exists(base+"."+zero_suffix(n,digits))) ++n;
   return n-1;
+}
+
+inline uint64_t recover_last_part_by_pattern(const PatternParts& pp, uint64_t maxn) {
+  uint64_t n=1;
+  while(n<=maxn && path_exists(pattern_number(pp,n))) ++n;
+  return n-1;
+}
+
+inline std::string oec_pattern_state_key(const std::string& spec) {
+  const size_t sep=last_path_separator(spec);
+  const std::string dir=sep==std::string::npos?std::string():spec.substr(0,sep+1);
+  return dir + oec_password_stem_from_archive(spec);
 }
 
 inline int spawn_self(const std::string& exe, const std::vector<std::string>& args) {
@@ -486,13 +498,14 @@ inline bool oec_progressive_json_after_add(const std::string& exe,const std::str
 inline void oec_a_usage() {
   std::fprintf(stderr,
     "OEC (Optimize + Error Correction) add:\n"
-    "  oec_a BASE_OR_SINGLE_ARCHIVE <zpaq add source/options...> [--ec-data N] [--ec-shard BYTES]\n"
+    "  oec_a BASE_OR_PATTERN_OR_SINGLE_ARCHIVE <zpaq add source/options...> [--ec-data N] [--ec-shard BYTES]\n"
     "           [--ec-stripes N] [--digits N] [--no-index-ec] [--no-part-ec]\n"
     "           [--idx PATH] [--idx-refresh] [--idx-plaintext] [--no-idx]\n"
     "           [--json-force|--force-json] [-gitignore]\n\n"
     "Examples:\n"
     "  zpaqoec oec_a compress /data -method 5\n"
-    "  zpaqoec oec_a archive.zpaq /data -method 5\n\n"
+    "  zpaqoec oec_a archive.zpaq /data -method 5\n"
+    "  zpaqoec oec_a \"backup?????.zpaq\" /data -method 5\n\n"
     "zpaq.ignore is loaded automatically from each source folder (gitignore-style);\n"
     "-gitignore also loads .gitignore from each source folder.\n"
     "Multipart mode creates a new BASE.NNN. Single-file mode appends to the\n"
@@ -505,10 +518,25 @@ inline int oec_a(int argc, const char* const* argv) {
   const std::string base = argv[2];
   const bool single = base.find('?')==std::string::npos && path_exists(base);
   uint32_t digits=3;
+  PatternParts explicit_pp; std::string explicit_perr;
+  const bool explicit_pattern = base.find('?')!=std::string::npos;
+  if(explicit_pattern && !parse_qmark_pattern(base,explicit_pp,explicit_perr)) {
+    std::fprintf(stderr,"oec_a: %s\n",explicit_perr.c_str()); return 2;
+  }
+  if(explicit_pattern) digits=explicit_pp.digits;
   zfec::Options ecopt;
   bool protect_trunk=true, protect_part=true;
   bool use_idx=true, refresh_idx=false, idx_explicit=false, idx_plaintext=false, json_force=false, use_gitignore=false;
-  std::string idx_path = oec_apply_idx_temp(single ? infer_single_idx(base) : base + ".idx");
+  std::string idx_path;
+  if(single) idx_path=infer_single_idx(base);
+  else if(explicit_pattern) {
+    const std::string explicit_index=infer_index_from_pattern(explicit_pp);
+    if(explicit_pp.suffix.empty() && !explicit_pp.prefix.empty() && explicit_pp.prefix[explicit_pp.prefix.size()-1]=='.')
+      idx_path=explicit_pp.prefix.substr(0,explicit_pp.prefix.size()-1)+".idx";
+    else idx_path=explicit_index+".idx";
+  } else idx_path=base+".idx";
+  idx_path=oec_apply_idx_temp(idx_path);
+  bool saw_chunk=false; std::string chunk_value;
   std::vector<std::string> pass;
   for (int i=3;i<argc;++i) {
     std::string a=argv[i];
@@ -528,6 +556,11 @@ inline int oec_a(int argc, const char* const* argv) {
     else if (a=="--no-idx") use_idx=false;
     else if (a=="--json-force" || a=="--force-json") json_force=true;
     else if (a=="-gitignore" || a=="--gitignore") use_gitignore=true;
+    else if (a=="-chunk" || a=="--chunk") {
+      saw_chunk=true;
+      if(i+1<argc) chunk_value=argv[++i];
+      else { std::fprintf(stderr,"oec_a: -chunk requires a value\n"); return 2; }
+    }
     else if (a=="-index" || a=="--index" || a=="--oec-index") {
       std::fprintf(stderr,"oec_a owns the OEC zero-part index path; initialize the archive with oecinit first\n"); return 2;
     } else pass.push_back(a);
@@ -536,6 +569,13 @@ inline int oec_a(int argc, const char* const* argv) {
   std::string verr;
   if (!zfec::validate_options(ecopt, verr)) { std::fprintf(stderr,"bad EC options: %s\n",verr.c_str()); return 2; }
   if (pass.empty()) { std::fprintf(stderr,"oec_a: missing source/add arguments\n"); return 2; }
+  if(saw_chunk) {
+    std::fprintf(stderr,
+      "oec_a: -chunk %s cannot be forwarded because zpaqfranz 64.8 rejects -chunk together with -index.\n"
+      "oec_a: OEC uses the zero-part -index for dedup/catalog authority. Remove -chunk for now; OEC physical part-size splitting must be implemented above the native -index layer.\n",
+      chunk_value.c_str());
+    return 2;
+  }
 
   OecIgnorePlan ignore_plan; std::string ignore_err, ignore_exclude_file;
   if(!oec_prepare_ignore_plan(pass,use_gitignore,ignore_plan,ignore_err)) { std::fprintf(stderr,"oec_a: ignore preparation failed: %s\n",ignore_err.c_str()); return 2; }
@@ -560,22 +600,32 @@ inline int oec_a(int argc, const char* const* argv) {
     }
     std::fprintf(stdout,"oec_a: mode=single data=%s index=%s\n",data_target.c_str(),index.c_str());
   } else {
-    data_target = base + "." + qmarks(digits);
-    index = base + "." + zero_suffix(0,digits);
+    PatternParts pp; std::string perr;
+    if(explicit_pattern) pp=explicit_pp;
+    else {
+      std::string shorthand=base+"."+qmarks(digits);
+      if(!parse_qmark_pattern(shorthand,pp,perr)) { std::fprintf(stderr,"oec_a: %s\n",perr.c_str()); return 2; }
+    }
+    // For explicit patterns preserve prefix/suffix exactly. For the legacy bare-base
+    // shorthand retain BASE.??? behavior.
+    data_target = explicit_pattern ? base : base+"."+qmarks(digits);
+    index = infer_index_from_pattern(pp);
+    const std::string state_key=explicit_pattern ? oec_pattern_state_key(base) : base;
     uint64_t maxn=1;
-    for (uint32_t i=0;i<digits;++i) maxn*=10;
+    for (uint32_t i=0;i<pp.digits;++i) maxn*=10;
     maxn-=1;
     uint64_t last=0;
-    if (!read_state(base,last)) {
+    if (!read_state(state_key,last)) {
       if (path_exists(index)) {
-        last=recover_last_part_by_names(base,digits,maxn);
+        last=explicit_pattern ? recover_last_part_by_pattern(pp,maxn) : recover_last_part_by_names(base,pp.digits,maxn);
         std::fprintf(stdout,"oec_a: recovered missing .ecstate once (last_part=%llu)\n",(unsigned long long)last);
       }
     }
     next=last+1;
     if (next>maxn) { std::fprintf(stderr,"oec_a: part number space exhausted\n"); return 1; }
-    expected_part = base + "." + zero_suffix(next,digits);
-    std::fprintf(stdout,"oec_a: mode=multipart index=%s next=%s\n", index.c_str(), expected_part.c_str());
+    expected_part = pattern_number(pp,next);
+    digits=pp.digits;
+    std::fprintf(stdout,"oec_a: mode=multipart pattern=%s index=%s next=%s\n", data_target.c_str(), index.c_str(), expected_part.c_str());
   }
 
   std::vector<std::string> child;
@@ -591,8 +641,11 @@ inline int oec_a(int argc, const char* const* argv) {
     std::fprintf(stderr,"oec_a: add succeeded but expected data file %s was not found; refusing to guess\n",expected_part.c_str());
     return 4;
   }
-  if (!single && !write_state(base,next)) {
-    std::fprintf(stderr,"oec_a: part was added but could not update %s; next run will recover once from filenames\n",state_path(base).c_str());
+  if (!single) {
+    const std::string state_key=explicit_pattern ? oec_pattern_state_key(base) : base;
+    if(!write_state(state_key,next)) {
+      std::fprintf(stderr,"oec_a: part was added but could not update %s; next run will recover once from filenames\n",state_path(state_key).c_str());
+    }
   }
 
   std::string err;

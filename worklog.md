@@ -80,7 +80,7 @@ Likewise the v1 cache has no stable fragment->part/block locator section yet, so
 4. Add fragment->part/block locators and use them in `oec_x/e` only after extraction equivalence tests pass.
 5. Stream EC directly from ordered ZPAQ output buffers to remove the post-close reread for newly created parts.
 
-## 0.4.1
+## 0.4.2
 - Added centralized default IDX relocation through `EOC_TEMP`.
 - Preserved explicit `--idx` precedence and legacy archive-local defaults when env is absent.
 - Added IDX regression cases for env/default/explicit path resolution.

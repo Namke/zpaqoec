@@ -26,3 +26,19 @@ rm compress.ecstate
 [ -f compress.003 ] && [ -f compress.003.ec ]
 grep -q 'last_part=3' compress.ecstate
 echo "OEC_A TESTS PASS"
+# Explicit wildcard pattern must be honored as-is (not treated as a bare base).
+rm -f Documents*.zpaq Documents*.ecstate Documents*.ec Documents*.idx fake_calls.log
+./zpaqfranz oec_a 'Documents?????.zpaq' dummy-source --ec-data 16 --ec-stripes 8 >/tmp/oec-pattern.out
+[ -f Documents00001.zpaq ] && [ -f Documents00001.zpaq.ec ]
+[ -f Documents00000.zpaq ] && [ -f Documents00000.zpaq.ec ]
+[ -f Documents.ecstate ]
+grep -q 'index=Documents00000.zpaq next=Documents00001.zpaq' /tmp/oec-pattern.out
+# -chunk must fail in OEC preflight, before native add, with an actionable reason.
+set +e
+./zpaqfranz oec_a 'Chunk?????.zpaq' dummy-source -chunk 4g >/tmp/oec-chunk.out 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 2 ]
+grep -q 'rejects -chunk together with -index' /tmp/oec-chunk.out
+[ ! -f Chunk00001.zpaq ]
+echo "OEC_A PATTERN/CHUNK PREFLIGHT TESTS PASS"
