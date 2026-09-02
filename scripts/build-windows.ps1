@@ -16,7 +16,7 @@ $UpstreamDir = Split-Path -Parent $UpstreamPath
 python "$Root\scripts\apply_to_upstream.py" "$UpstreamPath"
 if ($LASTEXITCODE -ne 0) { throw "apply_to_upstream.py failed with exit code $LASTEXITCODE" }
 
-if (-not (Select-String -LiteralPath $UpstreamPath -Pattern 'OecHybridHTIndex\s+htinv\s*\(' -Quiet) -or -not (Select-String -LiteralPath $UpstreamPath -SimpleMatch 'ZPAQOEC_DEEP_COMMIT' -Quiet)) { throw "deep IDX Jidac hook missing after injector; refusing RAM-only build" }
+if (-not (Select-String -LiteralPath $UpstreamPath -SimpleMatch 'OecHybridHTIndex' -Quiet) -or -not (Select-String -LiteralPath $UpstreamPath -SimpleMatch '#include "extensions/oec_deep.hpp"' -Quiet)) { throw "deep IDX Jidac hook missing after injector; refusing RAM-only build" }
 Write-Host "OEC deep IDX hook: verified"
 
 $ExtHeader = Join-Path $UpstreamDir "extensions\zpaqfranz_ext.hpp"

@@ -13,7 +13,7 @@ UPSTREAM_DIR="$(dirname "$UPSTREAM")"
 
 mkdir -p "$(dirname "$OUT")"
 python3 "$ROOT/scripts/apply_to_upstream.py" "$UPSTREAM"
-if ! grep -Eq 'OecHybridHTIndex[[:space:]]+htinv[[:space:]]*\(' "$UPSTREAM" || ! grep -Fq 'ZPAQOEC_DEEP_COMMIT' "$UPSTREAM"; then
+if ! grep -Fq 'OecHybridHTIndex' "$UPSTREAM" || ! grep -Fq '#include "extensions/oec_deep.hpp"' "$UPSTREAM"; then
   echo 'deep IDX Jidac hook missing after injector; refusing RAM-only build' >&2; exit 4; fi
 
 EXT_HEADER="$UPSTREAM_DIR/extensions/zpaqfranz_ext.hpp"

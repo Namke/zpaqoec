@@ -336,6 +336,14 @@ Linux:
 
 Windows / MSYS2 UCRT64:
 
+For a repository that has previously been built with an older injector hotfix, refresh the pristine 64.8 monolith once before rebuilding:
+
+```powershell
+.\scripts\fetch-upstream.ps1
+```
+
+Then build:
+
 ```powershell
 .\scripts\build-windows.ps1 `
   -Compiler 'C:\Programs\msys64\ucrt64\bin\g++.exe'

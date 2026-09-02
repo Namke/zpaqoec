@@ -22,5 +22,6 @@ echo "WINDOWS CRT ENUMERATION STATIC TESTS PASS"
 
 grep -Fq 'EOC_TEMP' "$ROOT/src/zpaqfranz_ext.hpp"
 
-grep -Fq -- "-Pattern 'OecHybridHTIndex\\s+htinv\\s*\\(' -Quiet" "$P"
-grep -Fq "grep -Eq 'OecHybridHTIndex[[:space:]]+htinv[[:space:]]*\\('" "$ROOT/scripts/build-linux.sh"
+grep -Fq -- "-SimpleMatch 'OecHybridHTIndex' -Quiet" "$P"
+grep -Fq "grep -Fq 'OecHybridHTIndex'" "$ROOT/scripts/build-linux.sh"
+grep -Fq 'deep scan diagnostics:' "$ROOT/scripts/apply_to_upstream.py"

@@ -1,5 +1,3 @@
-/* ZPAQOEC_BRIDGE_DECL */
-int zfext_oec_dispatch_bridge(int argc, const char* const* argv);
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -29,16 +27,14 @@ static void log_call(int argc, const char* const* argv) {
 struct HT { unsigned char sha1[20]; int64_t usize; HT():usize(0){std::memset(sha1,0,20);} HT(const char*s,int64_t n):usize(n){std::memcpy(sha1,s,20);} };
 class HTIndex { public: HTIndex(std::vector<HT>&h,unsigned):h_(h){} unsigned find(const char*s){for(unsigned i=1;i<h_.size();++i)if(std::memcmp(h_[i].sha1,s,20)==0)return i;return 0;} void update(){} private:std::vector<HT>&h_; };
 class Jidac { public: std::vector<HT> ht; int add(); };
-#include "extensions/oec_deep.hpp"
 int Jidac::add() {
   int errors=0; int64_t total_size=0; int fragment=16; std::vector<int> vf;
-  OecHybridHTIndex htinv(ht, ht.size()+(total_size>>(10+fragment))+vf.size());
+  HTIndex htinv(ht, ht.size()+(total_size>>(10+fragment))+vf.size());
   char sha1result[20]={0}; unsigned htptr=htinv.find(sha1result);
   if(htptr==0){htptr=ht.size();ht.push_back(HT(sha1result,123));htinv.update();}
   
   
   
-  /* ZPAQOEC_DEEP_COMMIT */ htinv.commit();
   return errors;
 }
 
@@ -62,8 +58,6 @@ int main() { return 98; }
 // Parameterized mains are eligible even when conditionally compiled out.
 #if 0
 int main(int argc, char** argv) {
-  /* ZPAQFRANZ_OEC_DISPATCH */
-  { const int zfext_rc = zfext_oec_dispatch_bridge(argc, argv); if (zfext_rc != -777777) return zfext_rc; }
 
 
 
@@ -76,8 +70,6 @@ int main(int argc, char** argv) {
 // eligible textual definitions should be instrumented.
 #if 0
 int zpaq_main_internal(int argc, const char** argv) {
-  /* ZPAQFRANZ_OEC_DISPATCH */
-  { const int zfext_rc = zfext_oec_dispatch_bridge(argc, argv); if (zfext_rc != -777777) return zfext_rc; }
 
 
 
@@ -88,8 +80,6 @@ int zpaq_main_internal(int argc, const char** argv) {
 #endif
 
 int zpaq_main_internal(int argc, const char** argv) {
-  /* ZPAQFRANZ_OEC_DISPATCH */
-  { const int zfext_rc = zfext_oec_dispatch_bridge(argc, argv); if (zfext_rc != -777777) return zfext_rc; }
 
 
 
@@ -204,8 +194,6 @@ int zpaq_main_internal(int argc, const char** argv) {
 }
 
 int main(int argc, char** argv) {
-  /* ZPAQFRANZ_OEC_DISPATCH */
-  { const int zfext_rc = zfext_oec_dispatch_bridge(argc, argv); if (zfext_rc != -777777) return zfext_rc; }
 
 
 
@@ -222,6 +210,3 @@ int main(int argc, char** argv) {
 
 
 
-#include "extensions/zpaqfranz_ext.hpp"
-/* ZPAQOEC_BRIDGE_DEF */
-int zfext_oec_dispatch_bridge(int argc, const char* const* argv) { return zfext::dispatch_const(argc, argv); }

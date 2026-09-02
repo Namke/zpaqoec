@@ -145,20 +145,64 @@ def find_function_body_range(text: str, pattern: str):
         i+=1
     return None
 
-def find_jidac_add_ranges(text: str):
-    """Return textual Jidac::add(...) definitions, tolerating signature drift.
+def scan_matching_brace(text: str, brace: int):
+    """Return one-past matching '}' for a brace, ignoring strings/comments."""
+    if brace < 0 or brace >= len(text) or text[brace] != '{':
+        return None
+    depth=0; i=brace
+    in_str=in_chr=in_line=in_block=False; esc=False
+    raw_end=None
+    while i < len(text):
+        c=text[i]; n=text[i+1] if i+1 < len(text) else ''
+        if raw_end is not None:
+            j=text.find(raw_end,i)
+            if j < 0: return None
+            i=j+len(raw_end); raw_end=None; continue
+        if in_line:
+            if c=='\n': in_line=False
+        elif in_block:
+            if c=='*' and n=='/': in_block=False; i+=1
+        elif in_str:
+            if esc: esc=False
+            elif c=='\\': esc=True
+            elif c=='"': in_str=False
+        elif in_chr:
+            if esc: esc=False
+            elif c=='\\': esc=True
+            elif c=="'": in_chr=False
+        else:
+            if c=='/' and n=='/': in_line=True; i+=1
+            elif c=='/' and n=='*': in_block=True; i+=1
+            elif c=='R' and n=='"':
+                # Basic C++ raw-string support: R"delim(... )delim"
+                op=text.find('(',i+2)
+                if op >= 0 and op-i < 32:
+                    delim=text[i+2:op]; raw_end=')'+delim+'"'; i=op
+                else: in_str=True
+            elif c=='"': in_str=True
+            elif c=="'": in_chr=True
+            elif c=='{': depth+=1
+            elif c=='}':
+                depth-=1
+                if depth==0: return i+1
+        i+=1
+    return None
 
-    zpaqfranz is a single translation unit and upstream has refactored add()
-    repeatedly.  Do not key the deep hook to an exact no-argument signature.
-    We only accept a candidate when a function body opens before any ';'.
+
+def find_jidac_add_ranges(text: str):
+    """Return Jidac::add definition ranges, independent of line formatting.
+
+    64.x is frequently reformatted/refactored.  `Jidac`, `::`, `add`, the
+    argument list, qualifiers and return type are allowed to span lines.  A
+    candidate is accepted only when a body brace appears before a declaration
+    semicolon after the balanced argument list.
     """
     out=[]
-    for m in re.finditer(r'(?m)^[ \t]*[^\n;{}]*\bJidac::add\s*\(', text):
-        line_start=m.start()
-        par=text.find('(', m.start())
-        if par < 0:
-            continue
-        depth=0; in_str=False; in_chr=False; esc=False; i=par
+    # Do not require Jidac::add to live on one line. This is the key 64.8 fix.
+    for m in re.finditer(r'\bJidac\s*::\s*add\s*\(', text, re.M):
+        par=text.find('(',m.start())
+        if par < 0: continue
+        depth=0; i=par; in_str=in_chr=False; esc=False
         while i < len(text):
             c=text[i]
             if in_str:
@@ -175,113 +219,172 @@ def find_jidac_add_ranges(text: str):
                 elif c=='(': depth+=1
                 elif c==')':
                     depth-=1
-                    if depth==0:
-                        break
+                    if depth==0: break
             i+=1
-        if depth != 0:
-            continue
-        semi=text.find(';', i+1)
-        brace=text.find('{', i+1)
-        if brace < 0 or (semi >= 0 and semi < brace):
-            continue
-        # Match the complete function body using the existing brace scanner.
-        r=find_function_body_range(text, re.escape(text[line_start:brace]).replace(r'\\ ', r'[ \\t]+'))
-        if r:
-            out.append(r)
-            continue
-        # Fallback body scan when the signature contains unusual whitespace.
-        d=0; in_str=False; in_chr=False; esc=False; j=brace
-        while j < len(text):
-            c=text[j]
-            if in_str:
-                if esc: esc=False
-                elif c=='\\': esc=True
-                elif c=='"': in_str=False
-            elif in_chr:
-                if esc: esc=False
-                elif c=='\\': esc=True
-                elif c=="'": in_chr=False
-            else:
-                if c=='"': in_str=True
-                elif c=="'": in_chr=True
-                elif c=='{': d+=1
-                elif c=='}':
-                    d-=1
-                    if d==0:
-                        out.append((line_start,brace,j+1)); break
-            j+=1
-    # De-duplicate candidates that a permissive regexp found twice.
+        if depth != 0: continue
+        # Allow noexcept/attributes/trailing return decorations, but reject a
+        # declaration if ';' is encountered before the body.
+        semi=text.find(';',i+1)
+        brace=text.find('{',i+1)
+        if brace < 0 or (semi >= 0 and semi < brace): continue
+        end=scan_matching_brace(text,brace)
+        if end is None: continue
+        out.append((m.start(),brace,end))
     dedup=[]; seen=set()
     for r in out:
-        if r[0] not in seen:
-            seen.add(r[0]); dedup.append(r)
+        if r[1] not in seen:
+            seen.add(r[1]); dedup.append(r)
     return dedup
 
 
-def inject_commit_before_final_return(body: str):
-    """Insert commit before the final return in the add() body.
+def find_deep_index_decl(body: str):
+    """Find the inverse fragment hash-index object used by add().
 
-    We intentionally do not hard-code `return errors;`: upstream has renamed
-    locals across revisions.  The final return is the normal completed path;
-    exceptions/aborts still do not publish the active IDX generation.
+    Do not assume the historical variable name `htinv`.  Score HTIndex local
+    objects by the operations required by the dedup hot path (`find` and
+    `update`) and by nearby Jidac add anchors.
     """
+    best=None
+    for m in re.finditer(r'\bHTIndex\s+([A-Za-z_]\w*)(?:\s|/\*.*?\*/|//[^\n]*(?:\n|$))*\(', body, re.S):
+        var=m.group(1)
+        score=0
+        if re.search(r'\b'+re.escape(var)+r'\s*\.\s*find\s*\(',body): score+=5
+        if re.search(r'\b'+re.escape(var)+r'\s*\.\s*update\s*\(',body): score+=5
+        if 'read_archive' in body: score+=2
+        if 'writeJidacHeader' in body: score+=2
+        if 'sha1result' in body: score+=1
+        if 'fragment' in body: score+=1
+        if best is None or score > best[0]: best=(score,m,var)
+    if best and best[0] >= 10:
+        return best[1],best[2]
+    return (None,None)
+
+
+def function_insertion_start(text: str, name_pos: int) -> int:
+    """Find a safe file-scope line before a possibly multi-line signature."""
+    cur=text.rfind('\n',0,name_pos)+1
+    pos=cur
+    # Walk up over return type, attributes and continuation lines. Stop after a
+    # clear previous declaration/body/preprocessor/blank boundary.
+    for _ in range(24):
+        if pos <= 0: return 0
+        prev_end=pos-1
+        prev_start=text.rfind('\n',0,prev_end)+1
+        line=text[prev_start:prev_end].strip()
+        if (not line or line.startswith('#') or line.endswith(';') or
+                line.endswith('}') or line.endswith(':')):
+            return pos
+        pos=prev_start
+    return pos
+
+
+def inject_commit_before_final_return(body: str, var: str):
+    """Insert commit before the final normal return in the add() body."""
     matches=list(re.finditer(r'(?m)^([ \t]*)return\b[^;]*;', body))
-    if not matches:
-        return body,0
-    # Prefer the historical authoritative success return when present.
-    preferred=[m for m in matches if re.search(r'\breturn\s+errors\s*;', m.group(0))]
+    if not matches: return body,0
+    preferred=[m for m in matches if re.search(r'\breturn\s+errors\s*;',m.group(0))]
     m=preferred[-1] if preferred else matches[-1]
     indent=m.group(1)
-    hook=indent+'/* ZPAQOEC_DEEP_COMMIT */ htinv.commit();\n'
+    hook=indent+'/* ZPAQOEC_DEEP_COMMIT */ '+var+'.commit();\n'
     return body[:m.start()]+hook+body[m.start():],1
 
 
+def deep_include_position(text: str, before_pos: int) -> int:
+    """Prefer inserting immediately after the native HTIndex class definition.
+
+    This avoids every possible multi-line/macro return-type formatting issue at
+    Jidac::add while guaranteeing both HT and HTIndex are already visible.
+    """
+    best=None
+    for m in re.finditer(r'\b(?:class|struct)\s+HTIndex\b', text[:before_pos]):
+        brace=text.find('{',m.end(),before_pos)
+        semi=text.find(';',m.end(),before_pos)
+        if brace < 0 or (semi >= 0 and semi < brace):
+            continue
+        end=scan_matching_brace(text,brace)
+        if end is None or end > before_pos:
+            continue
+        s=text.find(';',end,min(before_pos,end+4096))
+        if s < 0:
+            continue
+        best=s+1
+    if best is not None:
+        # Insert after the class declaration line, not between `}` and `;`.
+        nl=text.find('\n',best)
+        return len(text) if nl < 0 else nl+1
+    return function_insertion_start(text,before_pos)
+
 def patch_deep_jidac(text: str):
-    # Remove previous deep include/hooks for idempotence.  Revert only the
-    # declaration token, preserving upstream constructor arguments verbatim.
+    # Idempotence across r1/r2/r3.  Revert only injected adapter declarations;
+    # the native constructor expression and variable name remain untouched.
     text=re.sub(r'(?m)^[ \t]*#include[ \t]+"extensions/oec_deep\.hpp"[ \t]*(?:\r?\n|$)','',text)
-    text=re.sub(r'(?m)^[ \t]*/\* ZPAQOEC_DEEP_COMMIT \*/[ \t]*htinv\.commit\(\);[ \t]*(?:\r?\n|$)','',text)
-    text=re.sub(r'\bOecHybridHTIndex(?=\s+htinv\s*\()', 'HTIndex', text)
+    text=re.sub(r'(?m)^[ \t]*/\* ZPAQOEC_DEEP_COMMIT \*/[ \t]*[A-Za-z_]\w*[ \t]*\.[ \t]*commit\(\);[ \t]*(?:\r?\n|$)','',text)
+    text=re.sub(r'\bOecHybridHTIndex\b','HTIndex',text)
 
     ranges=find_jidac_add_ranges(text)
-    if not ranges:
+    patched=[]
+    # Patch backwards so source offsets remain valid.
+    for name_pos,brace,end in reversed(ranges):
+        body=text[name_pos:end]
+        mm,var=find_deep_index_decl(body)
+        if mm is None: continue
+        body=body[:mm.start()]+'OecHybridHTIndex'+body[mm.start()+len('HTIndex'):]
+        body,n=inject_commit_before_final_return(body,var)
+        if not n: continue
+        text=text[:name_pos]+body+text[end:]
+        patched.append((name_pos,var))
+
+    # Last-resort semantic fallback: do not depend on the Jidac::add symbol at
+    # all.  Across 64.x, the invariant we actually need is the inverse HTIndex
+    # local used for both find() and update().  Patch it only when that semantic
+    # candidate is unique, otherwise refuse rather than guess.
+    if not patched:
+        candidates=[]
+        for m in re.finditer(r'\bHTIndex\s+([A-Za-z_]\w*)(?:\s|/\*.*?\*/|//[^\n]*(?:\n|$))*\(',text,re.S):
+            var=m.group(1); lo=max(0,m.start()-131072); hi=min(len(text),m.start()+524288)
+            w=text[lo:hi]
+            score=0
+            if re.search(r'\b'+re.escape(var)+r'\s*\.\s*find\s*\(',w): score+=5
+            if re.search(r'\b'+re.escape(var)+r'\s*\.\s*update\s*\(',w): score+=5
+            if 'writeJidacHeader' in w: score+=2
+            if 'read_archive' in w: score+=2
+            if 'sha1result' in w: score+=1
+            if score>=10: candidates.append((score,m,var,lo,hi))
+        # Highest scoring candidate must be unique at its score. This handles
+        # unrelated HTIndex uses without taking a risky first-match shortcut.
+        if candidates:
+            candidates.sort(key=lambda x:x[0],reverse=True)
+            top=candidates[0][0]
+            topc=[c for c in candidates if c[0]==top]
+            if len(topc)==1:
+                _,m,var,lo,hi=topc[0]
+                text=text[:m.start()]+'OecHybridHTIndex'+text[m.start()+len('HTIndex'):]
+                patched.append((m.start(),var))
+                # Best effort explicit commit if the historical add symbol is
+                # still discoverable. If not, leaving this generation
+                # uncommitted is safe: next add catches up from authoritative
+                # HT/.000 before opening its new active generation.
+                anchors=list(re.finditer(r'Jidac\s*::\s*add\s*\(',text[lo:m.start()],re.S))
+                if anchors:
+                    apos=lo+anchors[-1].start()
+                    brace=text.find('{',apos,m.start()+len('OecHybridHTIndex')+1)
+                    if brace>=0:
+                        fend=scan_matching_brace(text,brace)
+                        if fend and fend>m.start():
+                            body=text[apos:fend]
+                            if 'ZPAQOEC_DEEP_COMMIT' not in body:
+                                body,n=inject_commit_before_final_return(body,var)
+                                if n: text=text[:apos]+body+text[fend:]
+
+    if not patched:
         return text,0
 
-    patched=0
-    include_pos=None
-    # Patch backwards so source offsets remain stable.  In normal 64.x there
-    # is one add() definition, but tolerate platform/feature variants.
-    for start,brace,end in reversed(ranges):
-        body=text[start:end]
-        # Semantic anchor: the native inverse hash index named htinv.  Replace
-        # ONLY the type token; do not rewrite argument expressions from upstream.
-        mm=re.search(r'\bHTIndex(?=\s+htinv\s*\()', body)
-        if not mm:
-            continue
-        body=body[:mm.start()]+'OecHybridHTIndex'+body[mm.end():]
-        body,n=inject_commit_before_final_return(body)
-        if not n:
-            continue
-        text=text[:start]+body+text[end:]
-        include_pos=start
-        patched+=1
-
-    if patched==0:
-        return text,0
-
-    # Re-locate the first patched add() after edits and include immediately
-    # before it. HT/HTIndex are therefore already defined, while the adapter is
-    # visible at the replacement declaration.
-    first=text.find('OecHybridHTIndex')
-    if first < 0:
-        return text,0
-    line=text.rfind('\n',0,first)+1
-    # Walk back to the Jidac::add signature rather than including inside body.
-    sig=text.rfind('Jidac::add',0,first)
-    if sig >= 0:
-        line=text.rfind('\n',0,sig)+1
-    text=text[:line]+'#include "extensions/oec_deep.hpp"\n'+text[line:]
-    return text,patched
+    # Include after the native HTIndex class whenever possible. This remains
+    # valid regardless of how the add function's return type/signature is split.
+    first=min(p[0] for p in patched)
+    inc=deep_include_position(text,first)
+    text=text[:inc]+'#include "extensions/oec_deep.hpp"\n'+text[inc:]
+    return text,len(patched)
 
 def main():
     ap = argparse.ArgumentParser(description='Inject OEC (Optimize + Error Correction) extension into zpaqfranz monolithic source')
@@ -308,6 +411,10 @@ def main():
     original = text
     text = remove_legacy(text)
     text, deep_count = patch_deep_jidac(text)
+    if deep_count == 0:
+        raw_add=len(list(re.finditer(r'Jidac\s*::\s*add\s*\(', text, re.S)))
+        raw_ht=len(list(re.finditer(r'\bHTIndex\s+[A-Za-z_]\w*', text)))
+        print(f'OEC deep scan diagnostics: jidac_add_symbols={raw_add} native_HTIndex_locals={raw_ht}')
 
     internal = find_function_matches(text, 'zpaq_main_internal')
     mains = find_function_matches(text, 'main')

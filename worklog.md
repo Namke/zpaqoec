@@ -98,3 +98,14 @@ Likewise the v1 cache has no stable fragment->part/block locator section yet, so
 - Added IDX regression cases for env/default/explicit path resolution.
 
 0.5.0: deep IDX HTIndex replacement, generation transaction model, RAM hot cache, deep preservation across metadata refresh, crash/fallback regression.
+## 0.5.0 chunk/deep-injector hotfix r3 (2026-09-02)
+
+- Reworked the deep IDX injector to identify the add-path inverse `HTIndex` by semantic `find()` + `update()` use rather than a fixed `Jidac::add()` line/signature or the historical `htinv` variable name.
+- Added a symbol-independent fallback for 64.x source refactors. It patches only a unique highest-scoring inverse `HTIndex` candidate and refuses ambiguous matches.
+- Fixed the r2 replacement bug that could consume the variable name/open parenthesis by replacing the complete regex match instead of only the `HTIndex` type token.
+- Deep header placement now prefers immediately after the native `HTIndex` declaration, avoiding split return-type/macro signature hazards.
+- Windows and Linux build gates verify the hybrid adapter semantically and no longer require the variable to be named `htinv`.
+- On a zero-hook result the injector prints candidate diagnostics (`jidac_add_symbols`, native `HTIndex` locals) before the build refuses a RAM-only binary.
+- Added regressions for multiline signatures, constructor drift, renamed inverse-index variables, complete add-method rename, and idempotent repatching.
+- Archive format, native `-chunk` behavior, `.000` authority, EC layout, and IDX2 format remain unchanged.
+

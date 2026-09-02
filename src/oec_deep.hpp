@@ -1,5 +1,5 @@
 #pragma once
-// oec_deep.hpp - deep IDX2 dedup backend injected immediately before Jidac::add().
+// oec_deep.hpp - deep IDX2 dedup backend injected after the native HTIndex declaration.
 // Requires upstream HT, HTIndex and vector<HT> declarations to already be visible.
 #include "oec_idx.hpp"
 #include <vector>
