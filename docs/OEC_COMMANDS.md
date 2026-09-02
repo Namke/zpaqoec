@@ -216,6 +216,9 @@ zpaqoec oec_l E:\Archives\compress
 
 ```bash
 zpaqoec oec_a compress /data -method 5
+
+# Native zpaqfranz multipart pattern is also accepted unchanged:
+zpaqoec oec_a "compress?????.zpaq" /data -method 5 -chunk 4g
 ```
 
 Single-file archive:

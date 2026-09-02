@@ -537,6 +537,7 @@ inline void oec_a_usage() {
     "           [--json-force|--force-json] [-gitignore]\n\n"
     "Examples:\n"
     "  zpaqoec oec_a compress /data -method 5\n"
+    "  zpaqoec oec_a 'compress?????.zpaq' /data -method 5 -chunk 4g\n"
     "  zpaqoec oec_a archive.zpaq /data -method 5\n\n"
     "zpaq.ignore is loaded automatically from each source folder (gitignore-style);\n"
     "-gitignore also loads .gitignore from each source folder.\n"
@@ -549,19 +550,22 @@ inline void oec_a_usage() {
 inline int oec_a(int argc, const char* const* argv) {
   if (argc < 3) { oec_a_usage(); return 2; }
   const std::string exe = argv[0];
-  const std::string base = argv[2];
-  const bool single = base.find('?')==std::string::npos && path_exists(base);
+  const std::string archive_spec = argv[2];
+  const bool explicit_pattern = archive_spec.find('?')!=std::string::npos;
+  const bool single = !explicit_pattern && path_exists(archive_spec);
   uint32_t digits=3;
+  bool digits_explicit=false;
   zfec::Options ecopt;
   bool protect_trunk=true, protect_part=true;
   bool use_idx=true, refresh_idx=false, idx_explicit=false, idx_plaintext=false, json_force=false, use_gitignore=false;
   std::string idx_memory="auto";
-  std::string idx_path = oec_apply_idx_temp(single ? infer_single_idx(base) : base + ".idx");
+  std::string idx_path;
   std::vector<std::string> pass;
   for (int i=3;i<argc;++i) {
     std::string a=argv[i];
     if (a=="--digits" && i+1<argc) {
       if (!zfec::parse_u32(argv[++i], digits) || digits<1 || digits>9) { std::fprintf(stderr,"bad --digits\n"); return 2; }
+      digits_explicit=true;
     } else if (a=="--ec-data" && i+1<argc) {
       if (!zfec::parse_u32(argv[++i], ecopt.data_shards)) { std::fprintf(stderr,"bad --ec-data\n"); return 2; }
     } else if (a=="--ec-shard" && i+1<argc) {
@@ -597,30 +601,59 @@ inline int oec_a(int argc, const char* const* argv) {
 
   std::string data_target;
   std::string index;
+  std::string state_base;
   uint64_t last_before=0, maxn=0;
   PatternParts data_pp;
   const bool native_chunk=oec_has_arg(pass,"-chunk");
   if(single) {
     if(native_chunk){std::fprintf(stderr,"oec_a: -chunk requires multipart BASE/pattern mode, not an existing single-file archive\n");return 2;}
-    data_target=base;
-    index=infer_single_index(base);
+    data_target=archive_spec;
+    index=infer_single_index(archive_spec);
+    state_base=archive_spec;
     if(!path_exists(index)) {
       std::fprintf(stderr,"oec_a: single archive zero-part index not found: %s (run oecinit/oec_init first)\n",index.c_str());
       return 3;
     }
     std::fprintf(stdout,"oec_a: mode=single data=%s index=%s\n",data_target.c_str(),index.c_str());
   } else {
-    data_target = base + "." + qmarks(digits);
-    std::string perr; if(!parse_qmark_pattern(data_target,data_pp,perr)){std::fprintf(stderr,"oec_a: %s\n",perr.c_str());return 2;}
-    index = base + "." + zero_suffix(0,digits);
+    if(explicit_pattern) {
+      data_target=archive_spec;
+      std::string perr; if(!parse_qmark_pattern(data_target,data_pp,perr)){std::fprintf(stderr,"oec_a: %s\n",perr.c_str());return 2;}
+      if(digits_explicit && digits!=data_pp.digits){std::fprintf(stderr,"oec_a: --digits %u conflicts with explicit archive pattern (%u ? digits)\n",digits,data_pp.digits);return 2;}
+      digits=data_pp.digits;
+      index=infer_index_from_pattern(data_pp);
+      // Reuse the historical BASE.ecstate for explicit BASE.??? patterns so
+      // oecinit/oec_a agree. For other native patterns (e.g. name?????.zpaq),
+      // bind state to the stable zero-part filename.
+      if(data_pp.suffix.empty() && !data_pp.prefix.empty() && data_pp.prefix[data_pp.prefix.size()-1]=='.')
+        state_base=data_pp.prefix.substr(0,data_pp.prefix.size()-1);
+      else state_base=index;
+    } else {
+      data_target = archive_spec + "." + qmarks(digits);
+      std::string perr; if(!parse_qmark_pattern(data_target,data_pp,perr)){std::fprintf(stderr,"oec_a: %s\n",perr.c_str());return 2;}
+      index = archive_spec + "." + zero_suffix(0,digits);
+      state_base=archive_spec;
+    }
     maxn=1; for (uint32_t i=0;i<digits;++i) maxn*=10; maxn-=1;
-    if (!read_state(base,last_before)) {
-      last_before=recover_last_part_by_names(base,digits,maxn);
+    if (!read_state(state_base,last_before)) {
+      last_before=oec_pattern_last_contiguous(data_pp,1);
       if(path_exists(index) || last_before)
         std::fprintf(stdout,"oec_a: recovered missing .ecstate once (last_part=%llu)\n",(unsigned long long)last_before);
     }
     if(last_before>=maxn){std::fprintf(stderr,"oec_a: part number space exhausted\n");return 1;}
-    std::fprintf(stdout,"oec_a: mode=multipart index=%s next=%s native_chunk=%s\n",index.c_str(),pattern_number(data_pp,last_before+1).c_str(),native_chunk?"yes":"no");
+    std::fprintf(stdout,"oec_a: mode=multipart pattern=%s index=%s next=%s native_chunk=%s\n",data_target.c_str(),index.c_str(),pattern_number(data_pp,last_before+1).c_str(),native_chunk?"yes":"no");
+  }
+
+  if(!idx_explicit) {
+    if(single) idx_path=oec_apply_idx_temp(infer_single_idx(archive_spec));
+    else if(!explicit_pattern) idx_path=oec_apply_idx_temp(archive_spec+".idx");
+    else {
+      // Mirror default_idx_for_layout(): dotted BASE.??? -> BASE.idx;
+      // otherwise bind the disposable cache to the authoritative zero part.
+      if(data_pp.suffix.empty() && !data_pp.prefix.empty() && data_pp.prefix[data_pp.prefix.size()-1]=='.')
+        idx_path=oec_apply_idx_temp(data_pp.prefix.substr(0,data_pp.prefix.size()-1)+".idx");
+      else idx_path=oec_apply_idx_temp(index+".idx");
+    }
   }
 
   std::vector<std::string> child;
@@ -661,13 +694,13 @@ inline int oec_a(int argc, const char* const* argv) {
 
   std::vector<std::string> new_parts;
   uint64_t last_after=last_before;
-  if(single){new_parts.push_back(base);}
+  if(single){new_parts.push_back(archive_spec);}
   else {
     uint64_t n=last_before+1;
     while(n<=maxn && path_exists(pattern_number(data_pp,n))){new_parts.push_back(pattern_number(data_pp,n));last_after=n;++n;}
     if(new_parts.empty()){std::fprintf(stderr,"oec_a: add succeeded but no new multipart file appeared after part %llu\n",(unsigned long long)last_before);return 4;}
-    if(!write_state(base,last_after))
-      std::fprintf(stderr,"oec_a: parts were added but could not update %s; next run will recover from filenames\n",state_path(base).c_str());
+    if(!write_state(state_base,last_after))
+      std::fprintf(stderr,"oec_a: parts were added but could not update %s; next run will recover from filenames\n",state_path(state_base).c_str());
   }
 
   std::string err;
@@ -715,7 +748,7 @@ inline int oec_a(int argc, const char* const* argv) {
   }
   {
     std::string jerr;
-    if(!oec_progressive_json_after_add(exe,base,index,pass,json_force,jerr,ignore_plan.active?&ignore_plan:0)) {
+    if(!oec_progressive_json_after_add(exe,archive_spec,index,pass,json_force,jerr,ignore_plan.active?&ignore_plan:0)) {
       if(!jerr.empty()) { std::fprintf(stderr,"oec_a: archive update is valid, JSON refresh failed: %s\n",jerr.c_str()); return 8; }
     }
   }
