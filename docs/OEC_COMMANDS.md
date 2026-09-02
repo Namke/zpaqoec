@@ -1,4 +1,4 @@
-# zpaqoec OEC command guide — 0.4.2
+# zpaqoec OEC command guide — 0.5.0
 
 OEC means **Optimize + Error Correction**. Original zpaqfranz commands remain available unchanged; use the `oec_*` namespace for the fork's optimized/error-corrected workflow.
 
@@ -32,7 +32,7 @@ zpaqoec oec_version
 Expected identity:
 
 ```text
-zpaqoec OEC overlay 0.4.2 (Optimize + Error Correction)
+zpaqoec OEC overlay 0.5.0 (Optimize + Error Correction)
 ```
 
 ## `oecinit` / `oec_init`
@@ -226,13 +226,22 @@ zpaqoec oec_a archive.zpaq /data -method 5 --idx X:/FastCache/archive.idx
 
 In single mode the same `archive.zpaq` is appended, `archive.000.zpaq` remains the external metadata index, and `archive.zpaq.ec` is regenerated after a successful add.
 
-OEC owns the native `-index` path and conceptually delegates:
+Without `-chunk`, OEC keeps the existing native external-index path:
 
 ```text
 a "compress.???" /data -method 5 -index compress.000
 ```
 
-New part EC and zero-part EC are then created/refreshed.
+With native zpaqfranz `-chunk`, upstream 64.8 rejects `-chunk` together with `-index`. OEC therefore preserves the exact native archive-writing command and rebuilds the metadata-only `.000` only after the add commits:
+
+```text
+a "compress.???" /data -method 5 -chunk 4g
+# data parts are now committed exactly as upstream wrote them
+x "compress.???" -index compress.000.oec-rebuild.tmp -force
+# atomic install -> compress.000
+```
+
+A single chunked add may create several physical parts. OEC discovers the complete newly-created contiguous range, protects **every** new part with its own `.ec`, updates `.ecstate` to the highest committed part, and never reopens the final short part from the previous add. For example, if one add creates parts `001..004`, the next add begins at `005`; part `004` remains immutable.
 
 ### Recursive ignore filtering
 
@@ -269,7 +278,7 @@ Supported rule features include `*`, `?`, `**`, `[abc]`/ranges, comments beginni
 
 OEC resolves the final ignored file/directory set before the native add and passes a temporary `-exclude` file to zpaqfranz. The temporary file is removed immediately after add. Progressive JSON/MD5 source hashing uses the same filtered set.
 
-Only the ignore file in each explicitly supplied source folder is loaded; patterns from that file filter descendants recursively. OEC does not automatically discover nested `.gitignore`/`zpaq.ignore` files in subdirectories in 0.4.2.
+Only the ignore file in each explicitly supplied source folder is loaded; patterns from that file filter descendants recursively. OEC does not automatically discover nested `.gitignore`/`zpaq.ignore` files in subdirectories in 0.5.0.
 
 Cache path:
 
@@ -303,7 +312,7 @@ zpaqoec oec_a compress /data -method 5
 zpaqoec oec_a compress /data -method 5 --json-force
 ```
 
-**0.4.2 boundary:** native zpaqfranz still reconstructs Jidac/fragment/file state for dedup. `.idx` does not yet replace that RAM state.
+**0.5.0 boundary:** `oec_a` replaces the transient upstream `HTIndex` lookup allocation with hybrid RAM+mmap IDX2 dedup when possible. `Jidac::HT` and `Jidac::DT` remain in RAM, so RAM is reduced but not constant. Use `--idx-memory auto|0|SIZE`; failures automatically fall back to upstream `HTIndex`.
 
 ## `oec_json` / `oec_j`
 
@@ -367,7 +376,7 @@ Supported `oec_json` options:
 -key PASSWORD / -franzen PASSWORD
 ```
 
-When a valid `.idx` exists and its list view is parseable, `oec_json` reads it through mmap. Otherwise it performs one native terse list pass against `.000`. Starting in 0.4.2, if that terse layout is not parseable, OEC retries `l -all -terse -nocolor` and collapses the explicit version/status history to the current live set. The parser also accepts pipe-status and plain/legacy layouts, compact/slash timestamps, and strips ANSI escape sequences. `PASSWORD_FOLDER` and `FRANZKEY` work as with the other OEC commands, including the extraction pass used by `--force-md5`.
+When a valid `.idx` exists and its list view is parseable, `oec_json` reads it through mmap. Otherwise it performs one native terse list pass against `.000`. Starting in 0.5.0, if that terse layout is not parseable, OEC retries `l -all -terse -nocolor` and collapses the explicit version/status history to the current live set. The parser also accepts pipe-status and plain/legacy layouts, compact/slash timestamps, and strips ANSI escape sequences. `PASSWORD_FOLDER` and `FRANZKEY` work as with the other OEC commands, including the extraction pass used by `--force-md5`.
 
 ## `oec_l`
 
@@ -421,7 +430,7 @@ zpaqoec oec_x compress path/to/file -to restore \
   --idx X:/FastCache/compress.idx
 ```
 
-The cache is validated as OEC metadata acceleration state. Actual payload still comes from multipart data through the native extractor because `.000` contains no D blocks. 0.4.2 does not yet claim direct fragment-to-part seeking.
+The cache is validated as OEC metadata acceleration state. Actual payload still comes from multipart data through the native extractor because `.000` contains no D blocks. 0.5.0 does not yet claim direct fragment-to-part seeking.
 
 ## `oec_e`
 
@@ -443,7 +452,9 @@ Current payload/cache boundary is the same as `oec_x`.
 
 Do not pass native `-index` to `oec_l/i/x/e`; use `--oec-index` for the OEC zero-part authority.
 
-## EC operations
+## EC / archive integrity operations
+
+Per-file EC commands remain available:
 
 ```bash
 zpaqoec ec create compress.001
@@ -451,6 +462,51 @@ zpaqoec ec verify compress.001
 zpaqoec ec repair compress.001 --output compress.001.repaired
 zpaqoec ec info compress.001.ec
 ```
+
+Whole-archive read-only verification checks every data part, the `.000` sidecar, and the disposable IDX cache:
+
+```bash
+zpaqoec oec_check compress
+# alias
+zpaqoec oec_verify compress
+```
+
+For wildcard naming:
+
+```bash
+zpaqoec oec_check "backup_????????.zpaq"
+```
+
+`oec_check` returns `0` when clean, `2` when maintenance is needed but EC reports the damage as repairable (including missing/stale IDX or missing EC), and `3` for structural/unrecoverable integrity problems. It does not modify anything.
+
+Self-heal the archive maintenance layer:
+
+```bash
+zpaqoec oec_fix compress
+```
+
+`oec_fix` performs these operations in order:
+
+- rebuild a missing authoritative `.000` from the native multipart archive;
+- create a missing EC sidecar;
+- repair EC-recoverable damaged data and preserve the damaged original as `*.oec-bad[.N]`;
+- regenerate damaged parity when the data shards verify cleanly;
+- verify/protect `.000`;
+- rebuild a missing/stale/corrupt disposable `.idx` from `.000`.
+
+A structurally unreadable EC sidecar is not silently trusted. If the data file is independently known-good and you intentionally want to replace such a sidecar, use:
+
+```bash
+zpaqoec oec_fix compress --rebuild-ec
+```
+
+IDX-only maintenance is still available and is the quickest command if only the SSD cache was deleted:
+
+```bash
+zpaqoec oec_idx ensure compress --idx X:/FastCache/compress.idx
+```
+
+Deleting `.idx` is always safe: `.000` is authoritative and `ensure`, `oec_fix`, or the normal lazy metadata path can recreate it.
 
 ## Windows examples
 
@@ -490,15 +546,3 @@ zpaqoec e ...
 ```
 
 These retain upstream behavior and are useful as a compatibility/regression baseline.
-
-### Explicit multipart patterns and `-chunk`
-
-`oec_a` accepts explicit patterns directly, for example:
-
-```bash
-zpaqoec oec_a "Documents?????.zpaq" /data -m3
-```
-
-This uses `Documents00000.zpaq` as the zero-part index and `Documents00001.zpaq`, `Documents00002.zpaq`, ... as data parts.
-
-Upstream zpaqfranz 64.8 rejects `-chunk` together with `-index`. Because OEC requires the zero-part `-index`, `oec_a` currently rejects `-chunk` in preflight rather than silently dropping it. Physical size-limited part splitting must be implemented at the OEC layer without changing ZPAQ/index semantics.

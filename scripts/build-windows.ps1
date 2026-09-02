@@ -16,6 +16,9 @@ $UpstreamDir = Split-Path -Parent $UpstreamPath
 python "$Root\scripts\apply_to_upstream.py" "$UpstreamPath"
 if ($LASTEXITCODE -ne 0) { throw "apply_to_upstream.py failed with exit code $LASTEXITCODE" }
 
+if (-not (Select-String -LiteralPath $UpstreamPath -SimpleMatch 'OecHybridHTIndex htinv' -Quiet) -or -not (Select-String -LiteralPath $UpstreamPath -SimpleMatch 'ZPAQOEC_DEEP_COMMIT' -Quiet)) { throw "deep IDX Jidac hook missing after injector; refusing RAM-only build" }
+Write-Host "OEC deep IDX hook: verified"
+
 $ExtHeader = Join-Path $UpstreamDir "extensions\zpaqfranz_ext.hpp"
 if (-not (Test-Path -LiteralPath $ExtHeader)) {
   throw "extension header missing after patch: $ExtHeader"
@@ -228,7 +231,7 @@ The binary compiled, but the OEC dispatcher is not on the executable command pat
 
 Assert-OecOutput -Label 'no-arg OEC help' -CommandArgs @() -Needle 'OEC (Optimize + Error Correction)'
 Assert-OecOutput -Label 'oec_h dispatcher' -CommandArgs @('oec_h') -Needle 'OEC (Optimize + Error Correction)'
-Assert-OecOutput -Label 'oec_version dispatcher' -CommandArgs @('oec_version') -Needle 'zpaqoec OEC overlay 0.4.2'
+Assert-OecOutput -Label 'oec_version dispatcher' -CommandArgs @('oec_version') -Needle 'zpaqoec OEC overlay 0.5.0'
 # Argument-sensitive smoke: this must reach the oecinit parser (not no-arg help).
 # Missing ARCHIVE is expected to return 2 and print oecinit usage.
 Assert-OecOutput -Label 'oecinit argv dispatch' -CommandArgs @('oecinit') -Needle 'Initialize/retrofit OEC archive' -ExpectedExit 2
@@ -261,7 +264,7 @@ if (-not [string]::IsNullOrWhiteSpace($InstallTo)) {
   $SavedBuilt = $BuiltExe
   $BuiltExe = $Installed
   try {
-    Assert-OecOutput -Label 'installed oec_version dispatcher' -CommandArgs @('oec_version') -Needle 'zpaqoec OEC overlay 0.4.2'
+    Assert-OecOutput -Label 'installed oec_version dispatcher' -CommandArgs @('oec_version') -Needle 'zpaqoec OEC overlay 0.5.0'
   } finally {
     $BuiltExe = $SavedBuilt
   }

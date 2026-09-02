@@ -34,7 +34,7 @@
 namespace zfext {
 
 static const int kNotHandled = -777777;
-static const char* const kOecOverlayVersion = "0.4.2";
+static const char* const kOecOverlayVersion = "0.5.0";
 
 inline std::string zero_suffix(uint64_t n, uint32_t digits) {
   std::ostringstream s; s << std::setw(static_cast<int>(digits)) << std::setfill('0') << n; return s.str();
@@ -169,7 +169,7 @@ inline std::string oec_archive_hint_for_password(int argc, const char* const* ar
   if(!argv || argc<2 || !argv[1]) return std::string();
   const std::string cmd=argv[1];
   if(cmd=="oec_idx") return argc>=4 && argv[3] ? argv[3] : std::string();
-  if(cmd=="oecinit" || cmd=="oec_init" || cmd=="oec_a" || cmd=="oec_l" || cmd=="oec_i" || cmd=="oec_x" || cmd=="oec_e" || cmd=="oec_json" || cmd=="oec_j")
+  if(cmd=="oecinit" || cmd=="oec_init" || cmd=="oec_a" || cmd=="oec_l" || cmd=="oec_i" || cmd=="oec_x" || cmd=="oec_e" || cmd=="oec_json" || cmd=="oec_j" || cmd=="oec_check" || cmd=="oec_verify" || cmd=="oec_fix")
     return argc>=3 && argv[2] ? argv[2] : std::string();
   // Native archive commands remain untouched by OEC after this preflight, but
   // they benefit from the same password-folder lookup before upstream prompts.
@@ -185,6 +185,15 @@ inline bool oec_set_franzkey_env(const std::string& password) {
   return setenv("FRANZKEY",password.c_str(),1)==0;
 #endif
 }
+
+inline void oec_set_env_value(const char* name,const std::string& value) {
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+  _putenv_s(name,value.c_str());
+#else
+  if(value.empty()) unsetenv(name); else setenv(name,value.c_str(),1);
+#endif
+}
+inline std::string oec_get_env_value(const char* name){const char*p=std::getenv(name);return p?std::string(p):std::string();}
 
 inline bool oec_read_first_password_line(const std::string& path, std::string& password, std::string& err) {
   password.clear(); err.clear();
@@ -259,16 +268,40 @@ inline uint64_t recover_last_part_by_names(const std::string& base, uint32_t dig
   return n-1;
 }
 
-inline uint64_t recover_last_part_by_pattern(const PatternParts& pp, uint64_t maxn) {
-  uint64_t n=1;
-  while(n<=maxn && path_exists(pattern_number(pp,n))) ++n;
-  return n-1;
+
+inline int spawn_self(const std::string& exe, const std::vector<std::string>& args);
+
+inline bool oec_has_arg(const std::vector<std::string>& args,const char* name) {
+  for(size_t i=0;i<args.size();++i) if(args[i]==name) return true;
+  return false;
 }
 
-inline std::string oec_pattern_state_key(const std::string& spec) {
-  const size_t sep=last_path_separator(spec);
-  const std::string dir=sep==std::string::npos?std::string():spec.substr(0,sep+1);
-  return dir + oec_password_stem_from_archive(spec);
+inline uint64_t oec_pattern_last_contiguous(const PatternParts& pp,uint64_t start=1) {
+  uint64_t n=start;
+  while(path_exists(pattern_number(pp,n))) ++n;
+  return n? n-1 : 0;
+}
+
+inline bool oec_rebuild_zero_index(const std::string& exe,const std::string& data_target,
+                                   const std::string& index,const std::vector<std::string>& auth,
+                                   std::string& err) {
+  const std::string tmp=index+".oec-rebuild.tmp";
+  std::remove(tmp.c_str());
+  std::vector<std::string> child;
+  child.push_back("x"); child.push_back(data_target);
+  child.insert(child.end(),auth.begin(),auth.end());
+  child.push_back("-index"); child.push_back(tmp); child.push_back("-force");
+  std::fprintf(stdout,"oec: rebuilding authoritative zero-part %s from native archive bytes\n",index.c_str());
+  std::fflush(stdout);
+  const int rc=spawn_self(exe,child);
+  if(rc!=0){std::remove(tmp.c_str());std::ostringstream e;e<<"native index rebuild failed rc="<<rc;err=e.str();return false;}
+  if(!path_exists(tmp)){err="native index rebuild did not create "+tmp;return false;}
+  const std::string bak=index+".oec-rebuild.bak";
+  const bool had=path_exists(index);
+  if(had){std::remove(bak.c_str());if(std::rename(index.c_str(),bak.c_str())!=0){std::remove(tmp.c_str());err="cannot move old zero-part aside: "+index;return false;}}
+  if(std::rename(tmp.c_str(),index.c_str())!=0){if(had)std::rename(bak.c_str(),index.c_str());std::remove(tmp.c_str());err="cannot install rebuilt zero-part: "+index;return false;}
+  if(had)std::remove(bak.c_str());
+  return true;
 }
 
 inline int spawn_self(const std::string& exe, const std::vector<std::string>& args) {
@@ -498,18 +531,19 @@ inline bool oec_progressive_json_after_add(const std::string& exe,const std::str
 inline void oec_a_usage() {
   std::fprintf(stderr,
     "OEC (Optimize + Error Correction) add:\n"
-    "  oec_a BASE_OR_PATTERN_OR_SINGLE_ARCHIVE <zpaq add source/options...> [--ec-data N] [--ec-shard BYTES]\n"
+    "  oec_a BASE_OR_SINGLE_ARCHIVE <zpaq add source/options...> [--ec-data N] [--ec-shard BYTES]\n"
     "           [--ec-stripes N] [--digits N] [--no-index-ec] [--no-part-ec]\n"
-    "           [--idx PATH] [--idx-refresh] [--idx-plaintext] [--no-idx]\n"
+    "           [--idx PATH] [--idx-refresh] [--idx-plaintext] [--idx-memory auto|0|SIZE] [--no-idx]\n"
     "           [--json-force|--force-json] [-gitignore]\n\n"
     "Examples:\n"
     "  zpaqoec oec_a compress /data -method 5\n"
-    "  zpaqoec oec_a archive.zpaq /data -method 5\n"
-    "  zpaqoec oec_a \"backup?????.zpaq\" /data -method 5\n\n"
+    "  zpaqoec oec_a archive.zpaq /data -method 5\n\n"
     "zpaq.ignore is loaded automatically from each source folder (gitignore-style);\n"
     "-gitignore also loads .gitignore from each source folder.\n"
-    "Multipart mode creates a new BASE.NNN. Single-file mode appends to the\n"
-    "existing archive and regenerates its sidecar EC. Both use a .000 metadata index.\n");
+    "Multipart mode preserves native zpaqfranz numbering. With -chunk, one add may\n"
+    "create several new parts; every committed part receives its own EC sidecar.\n"
+    "The .000 metadata index is authoritative and is rebuilt transactionally after\n"
+    "native -chunk adds because upstream rejects -chunk together with -index.\n");
 }
 
 inline int oec_a(int argc, const char* const* argv) {
@@ -518,25 +552,11 @@ inline int oec_a(int argc, const char* const* argv) {
   const std::string base = argv[2];
   const bool single = base.find('?')==std::string::npos && path_exists(base);
   uint32_t digits=3;
-  PatternParts explicit_pp; std::string explicit_perr;
-  const bool explicit_pattern = base.find('?')!=std::string::npos;
-  if(explicit_pattern && !parse_qmark_pattern(base,explicit_pp,explicit_perr)) {
-    std::fprintf(stderr,"oec_a: %s\n",explicit_perr.c_str()); return 2;
-  }
-  if(explicit_pattern) digits=explicit_pp.digits;
   zfec::Options ecopt;
   bool protect_trunk=true, protect_part=true;
   bool use_idx=true, refresh_idx=false, idx_explicit=false, idx_plaintext=false, json_force=false, use_gitignore=false;
-  std::string idx_path;
-  if(single) idx_path=infer_single_idx(base);
-  else if(explicit_pattern) {
-    const std::string explicit_index=infer_index_from_pattern(explicit_pp);
-    if(explicit_pp.suffix.empty() && !explicit_pp.prefix.empty() && explicit_pp.prefix[explicit_pp.prefix.size()-1]=='.')
-      idx_path=explicit_pp.prefix.substr(0,explicit_pp.prefix.size()-1)+".idx";
-    else idx_path=explicit_index+".idx";
-  } else idx_path=base+".idx";
-  idx_path=oec_apply_idx_temp(idx_path);
-  bool saw_chunk=false; std::string chunk_value;
+  std::string idx_memory="auto";
+  std::string idx_path = oec_apply_idx_temp(single ? infer_single_idx(base) : base + ".idx");
   std::vector<std::string> pass;
   for (int i=3;i<argc;++i) {
     std::string a=argv[i];
@@ -553,14 +573,10 @@ inline int oec_a(int argc, const char* const* argv) {
     else if (a=="--idx" && i+1<argc) { idx_path=argv[++i]; use_idx=true; idx_explicit=true; }
     else if (a=="--idx-refresh") { refresh_idx=true; use_idx=true; }
     else if (a=="--idx-plaintext") { idx_plaintext=true; use_idx=true; }
+    else if (a=="--idx-memory" && i+1<argc) { idx_memory=argv[++i]; use_idx=true; }
     else if (a=="--no-idx") use_idx=false;
     else if (a=="--json-force" || a=="--force-json") json_force=true;
     else if (a=="-gitignore" || a=="--gitignore") use_gitignore=true;
-    else if (a=="-chunk" || a=="--chunk") {
-      saw_chunk=true;
-      if(i+1<argc) chunk_value=argv[++i];
-      else { std::fprintf(stderr,"oec_a: -chunk requires a value\n"); return 2; }
-    }
     else if (a=="-index" || a=="--index" || a=="--oec-index") {
       std::fprintf(stderr,"oec_a owns the OEC zero-part index path; initialize the archive with oecinit first\n"); return 2;
     } else pass.push_back(a);
@@ -569,13 +585,6 @@ inline int oec_a(int argc, const char* const* argv) {
   std::string verr;
   if (!zfec::validate_options(ecopt, verr)) { std::fprintf(stderr,"bad EC options: %s\n",verr.c_str()); return 2; }
   if (pass.empty()) { std::fprintf(stderr,"oec_a: missing source/add arguments\n"); return 2; }
-  if(saw_chunk) {
-    std::fprintf(stderr,
-      "oec_a: -chunk %s cannot be forwarded because zpaqfranz 64.8 rejects -chunk together with -index.\n"
-      "oec_a: OEC uses the zero-part -index for dedup/catalog authority. Remove -chunk for now; OEC physical part-size splitting must be implemented above the native -index layer.\n",
-      chunk_value.c_str());
-    return 2;
-  }
 
   OecIgnorePlan ignore_plan; std::string ignore_err, ignore_exclude_file;
   if(!oec_prepare_ignore_plan(pass,use_gitignore,ignore_plan,ignore_err)) { std::fprintf(stderr,"oec_a: ignore preparation failed: %s\n",ignore_err.c_str()); return 2; }
@@ -588,72 +597,96 @@ inline int oec_a(int argc, const char* const* argv) {
 
   std::string data_target;
   std::string index;
-  std::string expected_part;
-  uint64_t next=0;
+  uint64_t last_before=0, maxn=0;
+  PatternParts data_pp;
+  const bool native_chunk=oec_has_arg(pass,"-chunk");
   if(single) {
+    if(native_chunk){std::fprintf(stderr,"oec_a: -chunk requires multipart BASE/pattern mode, not an existing single-file archive\n");return 2;}
     data_target=base;
     index=infer_single_index(base);
-    expected_part=base;
     if(!path_exists(index)) {
       std::fprintf(stderr,"oec_a: single archive zero-part index not found: %s (run oecinit/oec_init first)\n",index.c_str());
       return 3;
     }
     std::fprintf(stdout,"oec_a: mode=single data=%s index=%s\n",data_target.c_str(),index.c_str());
   } else {
-    PatternParts pp; std::string perr;
-    if(explicit_pattern) pp=explicit_pp;
-    else {
-      std::string shorthand=base+"."+qmarks(digits);
-      if(!parse_qmark_pattern(shorthand,pp,perr)) { std::fprintf(stderr,"oec_a: %s\n",perr.c_str()); return 2; }
+    data_target = base + "." + qmarks(digits);
+    std::string perr; if(!parse_qmark_pattern(data_target,data_pp,perr)){std::fprintf(stderr,"oec_a: %s\n",perr.c_str());return 2;}
+    index = base + "." + zero_suffix(0,digits);
+    maxn=1; for (uint32_t i=0;i<digits;++i) maxn*=10; maxn-=1;
+    if (!read_state(base,last_before)) {
+      last_before=recover_last_part_by_names(base,digits,maxn);
+      if(path_exists(index) || last_before)
+        std::fprintf(stdout,"oec_a: recovered missing .ecstate once (last_part=%llu)\n",(unsigned long long)last_before);
     }
-    // For explicit patterns preserve prefix/suffix exactly. For the legacy bare-base
-    // shorthand retain BASE.??? behavior.
-    data_target = explicit_pattern ? base : base+"."+qmarks(digits);
-    index = infer_index_from_pattern(pp);
-    const std::string state_key=explicit_pattern ? oec_pattern_state_key(base) : base;
-    uint64_t maxn=1;
-    for (uint32_t i=0;i<pp.digits;++i) maxn*=10;
-    maxn-=1;
-    uint64_t last=0;
-    if (!read_state(state_key,last)) {
-      if (path_exists(index)) {
-        last=explicit_pattern ? recover_last_part_by_pattern(pp,maxn) : recover_last_part_by_names(base,pp.digits,maxn);
-        std::fprintf(stdout,"oec_a: recovered missing .ecstate once (last_part=%llu)\n",(unsigned long long)last);
-      }
-    }
-    next=last+1;
-    if (next>maxn) { std::fprintf(stderr,"oec_a: part number space exhausted\n"); return 1; }
-    expected_part = pattern_number(pp,next);
-    digits=pp.digits;
-    std::fprintf(stdout,"oec_a: mode=multipart pattern=%s index=%s next=%s\n", data_target.c_str(), index.c_str(), expected_part.c_str());
+    if(last_before>=maxn){std::fprintf(stderr,"oec_a: part number space exhausted\n");return 1;}
+    std::fprintf(stdout,"oec_a: mode=multipart index=%s next=%s native_chunk=%s\n",index.c_str(),pattern_number(data_pp,last_before+1).c_str(),native_chunk?"yes":"no");
   }
 
   std::vector<std::string> child;
   child.push_back("a"); child.push_back(data_target);
   child.insert(child.end(), pass.begin(), pass.end());
   if(!ignore_exclude_file.empty()){ child.push_back("-exclude"); child.push_back(ignore_exclude_file); }
-  child.push_back("-index"); child.push_back(index);
+  // zpaqfranz 64.8 rejects -chunk together with -index. In chunk mode the
+  // archive-writing command is therefore byte-for-byte the native upstream add
+  // command. OEC rebuilds the metadata-only .000 in a separate post-commit pass.
+  if(!native_chunk){child.push_back("-index"); child.push_back(index);}
 
+  // Deep IDX dedup: make sure a cache container exists, then expose it only
+  // to the native child. A stale metadata fingerprint is acceptable here: the
+  // deep adapter validates/catches up against authoritative Jidac::HT.
+  bool deep_enabled=false;
+  if(use_idx) {
+    if(!path_exists(idx_path)) {
+      bool enc=false; std::string de;
+      if(oec_file_looks_standard_aes_encrypted(index,enc,de) && enc && !idx_plaintext) {
+        std::fprintf(stdout,"oec_a: deep idx disabled for encrypted zero-part without --idx-plaintext\n");
+      } else {
+        const std::vector<std::string> auth=oec_extract_auth_args(pass);
+        if(!build_idx_cache(exe,index,idx_path,de,auth))
+          std::fprintf(stderr,"oec_a: deep idx initial cache build failed (%s); using RAM dedup fallback\n",de.c_str());
+      }
+    }
+    if(path_exists(idx_path)) {
+      deep_enabled=true;
+      oec_set_env_value("ZPAQOEC_DEEP_IDX",idx_path);
+      oec_set_env_value("ZPAQOEC_IDX_MEMORY",idx_memory);
+      std::fprintf(stdout,"oec_a: deep idx candidate=%s memory=%s\n",idx_path.c_str(),idx_memory.c_str());
+    }
+  }
   const int rc=spawn_self(exe, child);
+  if(deep_enabled){oec_set_env_value("ZPAQOEC_DEEP_IDX","");oec_set_env_value("ZPAQOEC_IDX_MEMORY","");}
   if(!ignore_exclude_file.empty()) std::remove(ignore_exclude_file.c_str());
   if (rc!=0) { std::fprintf(stderr,"oec_a: zpaq add failed rc=%d; EC not written\n",rc); return rc; }
-  if (!path_exists(expected_part)) {
-    std::fprintf(stderr,"oec_a: add succeeded but expected data file %s was not found; refusing to guess\n",expected_part.c_str());
-    return 4;
-  }
-  if (!single) {
-    const std::string state_key=explicit_pattern ? oec_pattern_state_key(base) : base;
-    if(!write_state(state_key,next)) {
-      std::fprintf(stderr,"oec_a: part was added but could not update %s; next run will recover once from filenames\n",state_path(state_key).c_str());
-    }
+
+  std::vector<std::string> new_parts;
+  uint64_t last_after=last_before;
+  if(single){new_parts.push_back(base);}
+  else {
+    uint64_t n=last_before+1;
+    while(n<=maxn && path_exists(pattern_number(data_pp,n))){new_parts.push_back(pattern_number(data_pp,n));last_after=n;++n;}
+    if(new_parts.empty()){std::fprintf(stderr,"oec_a: add succeeded but no new multipart file appeared after part %llu\n",(unsigned long long)last_before);return 4;}
+    if(!write_state(base,last_after))
+      std::fprintf(stderr,"oec_a: parts were added but could not update %s; next run will recover from filenames\n",state_path(base).c_str());
   }
 
   std::string err;
-  if (protect_part) {
-    if (!zfec::create(expected_part, zfec::default_ec_path(expected_part), ecopt, true, err)) {
-      std::fprintf(stderr,"oec_a: archive data is valid but EC creation failed: %s\n",err.c_str()); return 5;
+  if(native_chunk) {
+    const std::vector<std::string> auth=oec_extract_auth_args(pass);
+    if(!oec_rebuild_zero_index(exe,data_target,index,auth,err)){
+      std::fprintf(stderr,"oec_a: native chunk add committed %llu new part(s), but zero-part rebuild failed: %s\n",(unsigned long long)new_parts.size(),err.c_str());return 6;
     }
-    std::fprintf(stdout,"oec_a: protected %s -> %s.ec\n",expected_part.c_str(),expected_part.c_str());
+    std::fprintf(stdout,"oec_a: native -chunk committed %llu new part(s), range=%llu..%llu; zero-part rebuilt\n",
+      (unsigned long long)new_parts.size(),(unsigned long long)(single?0:last_before+1),(unsigned long long)(single?0:last_after));
+  }
+
+  if (protect_part) {
+    for(size_t pi=0;pi<new_parts.size();++pi){const std::string& part=new_parts[pi];
+      if (!zfec::create(part, zfec::default_ec_path(part), ecopt, true, err)) {
+        std::fprintf(stderr,"oec_a: archive data is valid but EC creation failed for %s: %s\n",part.c_str(),err.c_str()); return 5;
+      }
+      std::fprintf(stdout,"oec_a: protected %s -> %s.ec\n",part.c_str(),part.c_str());
+    }
   }
   if (protect_trunk && path_exists(index)) {
     if (!zfec::create(index, zfec::default_ec_path(index), ecopt, true, err)) {
@@ -938,7 +971,6 @@ inline int oecinit(int argc, const char* const* argv) {
 }
 
 
-
 // OEC read-command routing. The portable .000 index is authoritative metadata
 // and contains no D blocks. Therefore metadata-only commands can run directly
 // against .000, while extraction commands must still address the multipart
@@ -991,6 +1023,151 @@ inline std::string default_idx_for_layout(const std::string& spec, const OecRead
   }
   return oec_apply_idx_temp(out);
 }
+
+
+struct OecEcCheckResult {
+  uint64_t files;
+  uint64_t ok;
+  uint64_t missing_ec;
+  uint64_t repairable;
+  uint64_t bad_parity;
+  uint64_t unrecoverable;
+  uint64_t structural;
+  OecEcCheckResult():files(0),ok(0),missing_ec(0),repairable(0),bad_parity(0),unrecoverable(0),structural(0){}
+};
+
+inline bool oec_collect_archive_parts(const OecReadLayout& layout,std::vector<std::string>& parts,std::string& err) {
+  parts.clear();
+  if(layout.single){if(!path_exists(layout.pattern)){err="archive data not found: "+layout.pattern;return false;}parts.push_back(layout.pattern);return true;}
+  PatternParts pp; if(!parse_qmark_pattern(layout.pattern,pp,err))return false;
+  for(uint64_t n=1;;++n){const std::string p=pattern_number(pp,n);if(!path_exists(p))break;parts.push_back(p);}
+  if(parts.empty()){err="first archive part not found for pattern: "+layout.pattern;return false;}
+  return true;
+}
+
+inline int oec_ec_verify_file(const std::string& file,bool verbose,OecEcCheckResult& sum,bool print=true) {
+  ++sum.files; const std::string ec=zfec::default_ec_path(file);
+  if(!path_exists(ec)){++sum.missing_ec;if(print)std::fprintf(stdout,"MISSING-EC %s -> %s\n",file.c_str(),ec.c_str());return 2;}
+  zfec::VerifyStats st; std::string err;
+  if(!zfec::verify(file,ec,st,err,verbose)){++sum.structural;if(print)std::fprintf(stdout,"EC-ERROR %s: %s\n",file.c_str(),err.c_str());return 3;}
+  if(st.unrecoverable_stripes || st.size_mismatch || st.ec_corrupt){++sum.unrecoverable;if(print)std::fprintf(stdout,"UNRECOVERABLE %s bad_data=%llu bad_parity=%llu unrecoverable=%llu size_mismatch=%s\n",file.c_str(),(unsigned long long)st.bad_data_shards,(unsigned long long)st.bad_parity_shards,(unsigned long long)st.unrecoverable_stripes,st.size_mismatch?"yes":"no");return 3;}
+  if(st.bad_data_shards){++sum.repairable;if(print)std::fprintf(stdout,"REPAIRABLE %s bad_data=%llu bad_parity=%llu stripes=%llu\n",file.c_str(),(unsigned long long)st.bad_data_shards,(unsigned long long)st.bad_parity_shards,(unsigned long long)st.repairable_stripes);return 2;}
+  if(st.bad_parity_shards){++sum.bad_parity;if(print)std::fprintf(stdout,"BAD-EC-PARITY %s bad_parity=%llu\n",file.c_str(),(unsigned long long)st.bad_parity_shards);return 2;}
+  ++sum.ok;if(print)std::fprintf(stdout,"OK %s\n",file.c_str());return 0;
+}
+
+inline std::string oec_unique_bad_backup(const std::string& file) {
+  std::string p=file+".oec-bad"; if(!path_exists(p))return p;
+  for(unsigned n=1;n<10000;++n){std::ostringstream o;o<<file<<".oec-bad."<<n;if(!path_exists(o.str()))return o.str();}
+  std::ostringstream o;o<<file<<".oec-bad."<<(unsigned long long)std::time(0);return o.str();
+}
+
+inline bool oec_install_repaired_data(const std::string& file,const std::string& repaired,std::string& backup,std::string& err) {
+  backup=oec_unique_bad_backup(file);
+  if(std::rename(file.c_str(),backup.c_str())!=0){err="cannot preserve damaged file as "+backup;return false;}
+  if(std::rename(repaired.c_str(),file.c_str())!=0){std::rename(backup.c_str(),file.c_str());err="cannot install repaired file "+file;return false;}
+  return true;
+}
+
+inline bool oec_fix_one_ec_file(const std::string& file,const zfec::Options& ecopt,bool verbose,bool rebuild_structural_ec,
+                                uint64_t& repaired,uint64_t& rebuilt,std::string& err) {
+  const std::string ec=zfec::default_ec_path(file);
+  if(!path_exists(ec)){
+    if(!zfec::create(file,ec,ecopt,true,err))return false;
+    ++rebuilt;std::fprintf(stdout,"oec_fix: created missing EC %s\n",ec.c_str());return true;
+  }
+  zfec::VerifyStats st;
+  if(!zfec::verify(file,ec,st,err,verbose)){
+    if(!rebuild_structural_ec){err="sidecar is structurally unreadable for "+file+" (use --rebuild-ec only if the data file is independently trusted)";return false;}
+    if(!zfec::create(file,ec,ecopt,true,err))return false;
+    ++rebuilt;std::fprintf(stdout,"oec_fix: rebuilt structurally bad EC %s from trusted data (--rebuild-ec)\n",ec.c_str());return true;
+  }
+  if(st.unrecoverable_stripes || st.size_mismatch || st.ec_corrupt){std::ostringstream e;e<<"unrecoverable EC/data damage in "<<file<<" (unrecoverable="<<st.unrecoverable_stripes<<", size_mismatch="<<(st.size_mismatch?"yes":"no")<<")";err=e.str();return false;}
+  if(st.bad_data_shards){
+    const std::string tmp=file+".oec-repair.tmp";std::remove(tmp.c_str());
+    if(!zfec::repair(file,ec,tmp,err,verbose)){std::remove(tmp.c_str());return false;}
+    zfec::VerifyStats post;std::string verr;
+    if(!zfec::verify(tmp,ec,post,verr,verbose)||post.bad_data_shards||post.bad_parity_shards||post.unrecoverable_stripes||post.size_mismatch||post.ec_corrupt){std::remove(tmp.c_str());err="post-repair verification failed for "+file+(verr.empty()?std::string():std::string(": ")+verr);return false;}
+    std::string backup;if(!oec_install_repaired_data(file,tmp,backup,err)){std::remove(tmp.c_str());return false;}
+    ++repaired;std::fprintf(stdout,"oec_fix: repaired %s; damaged original preserved as %s\n",file.c_str(),backup.c_str());return true;
+  }
+  if(st.bad_parity_shards){
+    if(!zfec::create(file,ec,ecopt,true,err))return false;
+    ++rebuilt;std::fprintf(stdout,"oec_fix: regenerated damaged EC parity %s\n",ec.c_str());return true;
+  }
+  std::fprintf(stdout,"oec_fix: OK %s\n",file.c_str());return true;
+}
+
+inline void oec_maintenance_usage() {
+  std::fprintf(stderr,
+    "OEC archive integrity maintenance:\n"
+    "  oec_check ARCHIVE [--digits N] [--oec-index PATH] [--idx PATH] [--no-idx] [--verbose]\n"
+    "  oec_fix   ARCHIVE [--digits N] [--oec-index PATH] [--idx PATH] [--no-idx] [--idx-plaintext]\n"
+    "                    [--ec-data N] [--ec-shard BYTES] [--ec-stripes N] [--rebuild-ec] [--verbose] [-key PASSWORD]\n"
+    "Aliases: oec_verify = oec_check\n\n"
+    "oec_check is read-only. oec_fix repairs EC-recoverable data, recreates missing/bad parity EC,\n"
+    "rebuilds a missing .000 from native archive parts, and ensures the disposable .idx cache.\n"
+    "A damaged original data part repaired in-place is preserved as *.oec-bad[.N].\n");
+}
+
+inline int oec_maintenance_command(int argc,const char* const* argv,bool fix) {
+  if(argc<3){oec_maintenance_usage();return 2;}
+  const std::string exe=argv[0],spec=argv[2];
+  uint32_t digits=3;std::string index_override,idx_override;bool use_idx=true,idx_plaintext=false,verbose=false,rebuild_structural_ec=false;
+  zfec::Options ecopt;std::vector<std::string> auth;
+  for(int i=3;i<argc;++i){const std::string a=argv[i];
+    if(a=="--digits"&&i+1<argc){if(!zfec::parse_u32(argv[++i],digits)||digits<1||digits>9){std::fprintf(stderr,"oec_%s: bad --digits\n",fix?"fix":"check");return 2;}}
+    else if(a=="--oec-index"&&i+1<argc)index_override=argv[++i];
+    else if(a=="--idx"&&i+1<argc){idx_override=argv[++i];use_idx=true;}
+    else if(a=="--no-idx")use_idx=false;
+    else if(a=="--idx-plaintext"){idx_plaintext=true;use_idx=true;}
+    else if(a=="--verbose")verbose=true;
+    else if(a=="--rebuild-ec")rebuild_structural_ec=true;
+    else if(a=="--ec-data"&&i+1<argc){if(!zfec::parse_u32(argv[++i],ecopt.data_shards))return 2;}
+    else if(a=="--ec-shard"&&i+1<argc){if(!zfec::parse_u32(argv[++i],ecopt.shard_size))return 2;}
+    else if(a=="--ec-stripes"&&i+1<argc){if(!zfec::parse_u32(argv[++i],ecopt.stripes_per_window))return 2;}
+    else if((a=="-key"||a=="-franzen")&&i+1<argc){auth.push_back(a);auth.push_back(argv[++i]);}
+    else {std::fprintf(stderr,"oec_%s: unknown option %s\n",fix?"fix":"check",a.c_str());return 2;}
+  }
+  std::string verr;if(!zfec::validate_options(ecopt,verr)){std::fprintf(stderr,"oec_%s: bad EC options: %s\n",fix?"fix":"check",verr.c_str());return 2;}
+  OecReadLayout layout;std::string err;
+  if(!resolve_oec_read_layout(spec,digits,index_override,layout,err)){std::fprintf(stderr,"oec_%s: %s\n",fix?"fix":"check",err.c_str());return 2;}
+  std::vector<std::string> parts;if(!oec_collect_archive_parts(layout,parts,err)){std::fprintf(stderr,"oec_%s: %s\n",fix?"fix":"check",err.c_str());return 3;}
+  const std::string idx=idx_override.empty()?default_idx_for_layout(spec,layout):idx_override;
+
+  if(fix && !path_exists(layout.index)){
+    if(!oec_rebuild_zero_index(exe,layout.pattern,layout.index,auth,err)){std::fprintf(stderr,"oec_fix: cannot rebuild missing zero-part: %s\n",err.c_str());return 4;}
+    std::fprintf(stdout,"oec_fix: rebuilt missing authoritative zero-part %s\n",layout.index.c_str());
+  }
+
+  if(!fix){
+    OecEcCheckResult sum;int worst=0;
+    for(size_t i=0;i<parts.size();++i)worst=std::max(worst,oec_ec_verify_file(parts[i],verbose,sum,true));
+    if(path_exists(layout.index))worst=std::max(worst,oec_ec_verify_file(layout.index,verbose,sum,true));
+    else {++sum.structural;worst=3;std::fprintf(stdout,"MISSING-INDEX %s\n",layout.index.c_str());}
+    if(use_idx){oecidx::Cache c;std::string ie;if(c.open(idx,layout.index,ie)&&c.current())std::fprintf(stdout,"IDX-OK %s\n",idx.c_str());else{worst=std::max(worst,2);std::fprintf(stdout,"IDX-NEEDS-REBUILD %s: %s\n",idx.c_str(),ie.c_str());}}
+    std::fprintf(stdout,"oec_check: files=%llu ok=%llu missing_ec=%llu repairable=%llu bad_parity=%llu structural=%llu unrecoverable=%llu idx=%s\n",(unsigned long long)sum.files,(unsigned long long)sum.ok,(unsigned long long)sum.missing_ec,(unsigned long long)sum.repairable,(unsigned long long)sum.bad_parity,(unsigned long long)sum.structural,(unsigned long long)sum.unrecoverable,use_idx?idx.c_str():"disabled");
+    return worst;
+  }
+
+  uint64_t repaired=0,rebuilt=0;
+  for(size_t i=0;i<parts.size();++i)if(!oec_fix_one_ec_file(parts[i],ecopt,verbose,rebuild_structural_ec,repaired,rebuilt,err)){std::fprintf(stderr,"oec_fix: %s\n",err.c_str());return 5;}
+  if(!oec_fix_one_ec_file(layout.index,ecopt,verbose,rebuild_structural_ec,repaired,rebuilt,err)){std::fprintf(stderr,"oec_fix: zero-part: %s\n",err.c_str());return 6;}
+  if(!layout.single && spec.find('?')==std::string::npos)write_state(spec,(uint64_t)parts.size());
+
+  if(use_idx){
+    bool enc=false;std::string ee;
+    if(oec_file_looks_standard_aes_encrypted(layout.index,enc,ee)&&enc&&!idx_plaintext)std::fprintf(stdout,"oec_fix: encrypted zero-part; plaintext IDX ensure skipped (use --idx-plaintext to opt in)\n");
+    else {oecidx::Cache c;std::string ie;if(!ensure_idx_cache(exe,layout.index,idx,true,c,ie,auth)||!c.current()){std::fprintf(stderr,"oec_fix: archive/EC fixed but IDX ensure failed: %s\n",ie.c_str());return 7;}std::fprintf(stdout,"oec_fix: IDX current %s\n",idx.c_str());}
+  }
+  OecEcCheckResult post;int worst=0;for(size_t i=0;i<parts.size();++i)worst=std::max(worst,oec_ec_verify_file(parts[i],verbose,post,false));worst=std::max(worst,oec_ec_verify_file(layout.index,verbose,post,false));
+  if(worst){std::fprintf(stderr,"oec_fix: post-fix EC verification still reports problems\n");return 8;}
+  std::fprintf(stdout,"oec_fix: DONE parts=%llu repaired_data=%llu rebuilt_ec=%llu index=%s idx=%s\n",(unsigned long long)parts.size(),(unsigned long long)repaired,(unsigned long long)rebuilt,layout.index.c_str(),use_idx?idx.c_str():"disabled");
+  return 0;
+}
+
+
+
 
 
 struct OecJsonFileRecord {
@@ -1911,6 +2088,8 @@ inline void oec_quick_help(const char* exe) {
     "  oec_x ARCHIVE [files/options]   OEC equivalent of native x\n"
     "  oec_e ARCHIVE [files/options]   OEC equivalent of native e\n"
     "  oec_idx build|verify|info|ensure|upgrade|rebuild|drop  mmap SSD cache manager\n"
+    "  oec_check | oec_verify ARCHIVE  verify every part/EC + .000 EC + IDX (read-only)\n"
+    "  oec_fix ARCHIVE                repair EC-recoverable parts and self-heal .000/IDX\n"
     "  oec_json | oec_j ARCHIVE       write JSON catalog; --force-md5 hashes extracted payload\n"
     "  ec create|verify|repair|info    independent EC sidecar operations\n"
     "  oec_version                    show OEC overlay version/build identity\n"
@@ -1938,6 +2117,8 @@ inline int dispatch_const(int argc, const char* const* argv) {
   if (cmd=="oec_version") { std::fprintf(stdout, "zpaqoec OEC overlay %s (Optimize + Error Correction)\n", kOecOverlayVersion); return 0; }
   if (cmd=="ec") return zfec::cli(argc-1, argv+1);
   if (cmd=="oec_idx") return oec_idx_command(argc, argv);
+  if (cmd=="oec_check" || cmd=="oec_verify") return oec_maintenance_command(argc, argv, false);
+  if (cmd=="oec_fix") return oec_maintenance_command(argc, argv, true);
   if (cmd=="oec_json" || cmd=="oec_j") return oec_json_command(argc, argv);
   if (cmd=="oec_a") return oec_a(argc, argv);
   if (cmd=="oecinit" || cmd=="oec_init") return oecinit(argc, argv);

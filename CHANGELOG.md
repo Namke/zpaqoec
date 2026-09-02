@@ -1,10 +1,24 @@
-# 0.4.2
+# Changelog
 
-- Fix `oec_a` explicit multipart patterns such as `Documents?????.zpaq`; zero/next parts now resolve to `Documents00000.zpaq` / `Documents00001.zpaq` instead of appending `.000/.001` after the literal pattern.
-- Add OEC preflight for upstream `-chunk` + `-index` incompatibility. OEC now fails immediately with an actionable explanation instead of spawning zpaqfranz and failing late.
-- Preserve legacy bare-base multipart behavior.
+## 0.5.0 chunk/IDX/EC compatibility hotfix
 
-## 0.4.2 - EOC_TEMP default IDX relocation
+- Preserve native zpaqfranz `-chunk` archive-writing semantics. `oec_a ... -chunk` no longer injects `-index`; after the upstream add commits, OEC transactionally rebuilds `.000` with native `x -index`.
+- Remove the one-add/one-part assumption. OEC discovers and protects every newly committed physical part and advances `.ecstate` to the highest part. A later add starts at the next part and never fills the previous update's short final part.
+- Add `oec_check` / `oec_verify` for read-only whole-archive EC + zero-part + IDX verification.
+- Add `oec_fix` to repair EC-recoverable data, preserve damaged originals as `*.oec-bad[.N]`, regenerate missing/bad parity EC, rebuild a missing `.000`, and ensure the disposable `.idx`.
+- Add regression tests for multi-part `-chunk` update sequencing, native-call compatibility, manual IDX deletion/rebuild, missing `.000` reconstruction, and EC repair.
+
+# 0.5.0
+
+- Deep IDX2 dedup backend for `oec_a`: `OecHybridHTIndex` replaces transient upstream `HTIndex` when cache is usable.
+- mmap open-addressed FRAGMENT_TABLE with SHA-1, fragment ID, usize, generation and per-slot CRC32C.
+- Hybrid `--idx-memory auto|0|SIZE` RAM hot cache over OS page cache/SSD.
+- O(1) generation commit and crash-safe unpublished generations.
+- Deep section preserved across metadata IDX refreshes.
+- Build hard-gates the Jidac deep hook and falls back to native HTIndex at runtime on cache failure.
+- Jidac HT/DT vectors remain in RAM; direct block locator extraction remains future work.
+
+## 0.5.0 - EOC_TEMP default IDX relocation
 
 - Add `EOC_TEMP`: when non-empty, every automatically derived `.idx` path is relocated into that directory while preserving the existing archive-derived basename.
 - Keep precedence `--idx PATH` > `EOC_TEMP` > archive-local default.

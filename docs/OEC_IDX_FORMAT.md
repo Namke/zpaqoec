@@ -1,4 +1,4 @@
-# OEC IDX format — OECIDX2 (0.4.2)
+# OEC IDX format — OECIDX2 (0.5.0)
 
 `.idx` is a disposable acceleration cache. The `.000` ZPAQ metadata index is authoritative; deleting `.idx` never makes the archive unrecoverable.
 
@@ -26,8 +26,8 @@ INFO                 materialized native i view (compatibility)
 FILE_TABLE           fixed-size structured current-file records
 STRING_POOL          paths, modification timestamps, attributes
 PATH_HASH            sorted FNV-1a(path) -> FILE_TABLE index
-FRAGMENT_TABLE       reserved, empty in 0.4.2
-BLOCK_TABLE          reserved, empty in 0.4.2
+FRAGMENT_TABLE       reserved, empty in 0.5.0
+BLOCK_TABLE          reserved, empty in 0.5.0
 ```
 
 `FILE_TABLE` contains path offset/length, size, modification timestamp, attributes, type, current version, status and compression ratio. `PATH_HASH` is mmap-searchable and verifies each index points to a valid file record.
@@ -38,8 +38,12 @@ The reader accepts both `OECIDX1` and `OECIDX2`. New builds write IDX2. IDX1 con
 
 ## Current RAM/dedup boundary
 
-0.4.2 makes the metadata cache structured, but it does **not** yet replace upstream `Jidac`/`HTIndex` during `oec_a`. The fragment/block sections are intentionally reserved and zero-count until a safe upstream export/dedup hook is implemented. OEC never uses an incomplete fragment table for dedup.
+0.5.0 activates the reserved `FRAGMENT_TABLE` as a mutable open-addressed SHA-1 -> fragment-id index used by `oec_a`. A small `DeepMeta` header stores capacity, committed/last generation, indexed-through fragment ID and committed count. Each slot stores SHA-1, fragment ID, uncompressed size, generation and per-slot CRC32C. Metadata sections remain transactional/rebuildable; metadata refresh preserves the deep EOF section. `BLOCK_TABLE` remains reserved for future direct extraction seeking.
 
 ## Encrypted archives
 
 Structured IDX still exposes filenames/metadata in plaintext. Automatic plaintext cache creation remains disabled for standard AES-encrypted `.000` unless `--idx-plaintext` is explicitly supplied. Password resolution continues to support explicit key, `FRANZKEY`, `PASSWORD_FOLDER`, then interactive input.
+
+### Deep generation semantics
+
+At adapter open, `active_generation = ++last_generation` is persisted. Existing slots with generation <= `committed_generation` are visible; slots from the active generation are visible only to that process so duplicate chunks within the same add deduplicate. Normal `Jidac::add()` return calls `htinv.commit()`, which publishes the active generation by updating `committed_generation` and `indexed_through`. A crash does not advance committed generation; abandoned slots are invisible and become reusable tombstones.

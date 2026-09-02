@@ -13,6 +13,8 @@ UPSTREAM_DIR="$(dirname "$UPSTREAM")"
 
 mkdir -p "$(dirname "$OUT")"
 python3 "$ROOT/scripts/apply_to_upstream.py" "$UPSTREAM"
+if ! grep -Fq 'OecHybridHTIndex htinv' "$UPSTREAM" || ! grep -Fq 'ZPAQOEC_DEEP_COMMIT' "$UPSTREAM"; then
+  echo 'deep IDX Jidac hook missing after injector; refusing RAM-only build' >&2; exit 4; fi
 
 EXT_HEADER="$UPSTREAM_DIR/extensions/zpaqfranz_ext.hpp"
 if [[ ! -f "$EXT_HEADER" ]]; then
@@ -26,6 +28,6 @@ printf 'built: %s\n' "$OUT"
 # Runtime smoke gate: compile success alone does not prove the OEC dispatcher
 # is on the executable command path.
 "$OUT" oec_h | grep -Fq 'OEC (Optimize + Error Correction)'
-"$OUT" oec_version | grep -Fq 'zpaqoec OEC overlay 0.4.2'
+"$OUT" oec_version | grep -Fq 'zpaqoec OEC overlay 0.5.0'
 "$OUT" | grep -Fq 'OEC (Optimize + Error Correction)'
 printf 'smoke PASS: OEC dispatcher/no-arg/version\n'

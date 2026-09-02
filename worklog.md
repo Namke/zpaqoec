@@ -1,3 +1,11 @@
+## 0.5.0 chunk compatibility + archive maintenance hotfix
+
+- `oec_a -chunk` now executes the untouched native chunk writer without `-index`, then derives `.000` in a separate transactional metadata pass.
+- Multi-part-per-add is first-class: all new parts receive EC; next add begins after the highest part and never mutates the prior tail.
+- `oec_check` / `oec_verify` audit every EC sidecar, `.000`, and IDX state without writing.
+- `oec_fix` self-heals repairable EC damage and missing `.000`/IDX state while preserving replaced damaged data.
+- Added chunk-compatibility and maintenance regressions.
+
 ## 0.3.8 - OEC ignore filtering
 
 - Added automatic `zpaq.ignore` filtering to `oec_a`.
@@ -80,7 +88,9 @@ Likewise the v1 cache has no stable fragment->part/block locator section yet, so
 4. Add fragment->part/block locators and use them in `oec_x/e` only after extraction equivalence tests pass.
 5. Stream EC directly from ordered ZPAQ output buffers to remove the post-close reread for newly created parts.
 
-## 0.4.2
+## 0.5.0
 - Added centralized default IDX relocation through `EOC_TEMP`.
 - Preserved explicit `--idx` precedence and legacy archive-local defaults when env is absent.
 - Added IDX regression cases for env/default/explicit path resolution.
+
+0.5.0: deep IDX HTIndex replacement, generation transaction model, RAM hot cache, deep preservation across metadata refresh, crash/fallback regression.

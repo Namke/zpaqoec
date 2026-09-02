@@ -39,6 +39,6 @@ python3 "$ROOT/scripts/apply_to_upstream.py" "$TMP/fake.cpp" >/dev/null
 
 g++ -std=c++11 -O2 "$TMP/fake.cpp" -o "$TMP/zpaqoec"
 "$TMP/zpaqoec" oec_h | grep -Fq 'OEC (Optimize + Error Correction)'
-"$TMP/zpaqoec" oec_version | grep -Fq 'zpaqoec OEC overlay 0.4.2'
+"$TMP/zpaqoec" oec_version | grep -Fq 'zpaqoec OEC overlay 0.5.0'
 "$TMP/zpaqoec" | grep -Fq 'OEC (Optimize + Error Correction)'
 echo "INJECTOR TESTS PASS"

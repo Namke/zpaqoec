@@ -1,4 +1,4 @@
-# zpaqoec 0.4.2
+# zpaqoec 0.5.0
 
 **OEC = Optimize + Error Correction.**
 
@@ -49,10 +49,10 @@ zpaqoec oec_idx ensure E:\Archives\compress --idx Y:\Pinned\compress.idx
 
 Run `zpaqoec` with no parameters for quick help. Full OEC usage is in [`docs/OEC_COMMANDS.md`](docs/OEC_COMMANDS.md).
 
-| Command | Role | `.idx` behavior in 0.4.2 |
+| Command | Role | `.idx` behavior in 0.5.0 |
 |---|---|---|
 | `oecinit` / `oec_init` | retrofit existing single or multipart archive with `.000` + EC | builds/reuses `.idx` for unencrypted metadata; encrypted `.000` skips plaintext IDX unless `--idx-plaintext` |
-| `oec_a` | incremental add through `.000` + EC | maintains cache lifecycle; `--idx-refresh` refreshes immediately |
+| `oec_a` | incremental add + EC | preserves native `-chunk` writer semantics; chunked add rebuilds `.000` post-commit and protects every new part |
 | `oec_l` | optimized native `l` equivalent | default form served directly from mmap cache; lazy rebuild from `.000` |
 | `oec_i` | optimized native `i` equivalent | default form served directly from mmap cache; lazy rebuild from `.000` |
 | `oec_x` | OEC native `x` equivalent | validates available cache; payload still delegated to multipart native extractor |
@@ -84,11 +84,11 @@ A valid `.idx` list view is consumed via mmap when possible; otherwise OEC perfo
 
 ### Current acceleration boundary
 
-0.4.2 upgrades the mmap cache to **OECIDX2**: structured FILE_TABLE + STRING_POOL + sorted PATH_HASH sections are stored alongside LIST/INFO compatibility views. `oec_l`/`oec_i` still use cached native views for exact presentation, while `oec_json` consumes structured file records directly without reparsing list text.
+0.5.0 upgrades the mmap cache to **OECIDX2**: structured FILE_TABLE + STRING_POOL + sorted PATH_HASH sections are stored alongside LIST/INFO compatibility views. `oec_l`/`oec_i` still use cached native views for exact presentation, while `oec_json` consumes structured file records directly without reparsing list text.
 
 Option-rich forms such as `oec_l compress -all` still call the native `.000` parser so upstream filtering/version semantics remain exact.
 
-`oec_a` still delegates deduplication to upstream `Jidac`. Therefore 0.4.2 does **not** claim that the full fragment/file state has moved out of RAM. The cache file/lifecycle and mmap layer are ready for the deeper HT/DT backend, but correctness takes priority over replacing upstream dedup structures prematurely.
+0.5.0 adds the first deep IDX backend for `oec_a`: the large transient upstream `HTIndex` hash lookup is replaced by `OecHybridHTIndex`, using a bounded RAM hot cache over an mmap IDX2 `FRAGMENT_TABLE`. The authoritative `Jidac::HT` and `Jidac::DT` vectors are still reconstructed in RAM, so this milestone reduces the dedup lookup RAM peak but does **not** claim constant-memory add yet. If the deep table cannot be opened/validated, the adapter constructs the original upstream `HTIndex` as a correctness fallback.
 
 Likewise `oec_x/oec_e` still let upstream decode multipart payload. The cache is validated and available, but fragment-to-part direct seeking is not claimed yet.
 
@@ -174,7 +174,7 @@ Precedence is: explicit `-key`/`-franzen` > existing `FRANZKEY` > `PASSWORD_FOLD
 
 ### AES-encrypted archives and IDX
 
-The `.idx` payload contains plaintext filename/metadata sections (IDX2 adds structured records in addition to LIST/INFO). Therefore OEC 0.4.2 does **not** create or automatically use a plaintext `.idx` when the authoritative `.000` is standard AES-encrypted. `oecinit` still completes after producing the payload EC, encrypted `.000`, and `.000.ec`.
+The `.idx` payload contains plaintext filename/metadata sections (IDX2 adds structured records in addition to LIST/INFO). Therefore OEC 0.5.0 does **not** create or automatically use a plaintext `.idx` when the authoritative `.000` is standard AES-encrypted. `oecinit` still completes after producing the payload EC, encrypted `.000`, and `.000.ec`.
 
 To explicitly allow a plaintext SSD cache:
 
@@ -228,13 +228,19 @@ The format is documented in [`docs/OEC_IDX_FORMAT.md`](docs/OEC_IDX_FORMAT.md).
 zpaqoec oec_a compress /data -method 5
 ```
 
-Conceptually the archive update is still native ZPAQ:
+For a normal non-chunk add, the existing external-index path remains native ZPAQ:
 
 ```text
 a "compress.???" /data -method 5 -index compress.000
 ```
 
-Then OEC protects the new part and refreshes `compress.000.ec`.
+For native chunked multipart, OEC deliberately does **not** combine `-chunk` with `-index` because zpaqfranz 64.8 rejects that combination. The archive-writing call is exactly the upstream form:
+
+```text
+a "compress.???" /data -method 5 -chunk 4g
+```
+
+After commit, OEC rebuilds `.000` in a separate native `x -index` pass, then creates EC for every new physical part and for `.000`. If an add creates `001..004`, the next add starts at `005`; `004` is never reopened or filled.
 
 By default an existing `.idx` becomes stale when `.000` changes. The next default `oec_l/oec_i` validates the fingerprint and lazily rebuilds it. To pay the refresh cost during add instead:
 
@@ -248,6 +254,22 @@ Disable cache lifecycle for the add:
 ```bash
 zpaqoec oec_a compress /data --no-idx
 ```
+
+## Archive integrity maintenance
+
+```bash
+# Read-only: verify all data-part EC, .000 EC, and IDX state
+zpaqoec oec_check compress
+# alias: oec_verify
+
+# Self-heal repairable EC damage and recreate missing .000 / disposable IDX
+zpaqoec oec_fix compress
+
+# If only IDX was manually deleted/staled/corrupted
+zpaqoec oec_idx ensure compress --idx X:/ZpaqCache/compress.idx
+```
+
+`oec_fix` preserves any replaced damaged data part as `*.oec-bad[.N]`. A structurally unreadable EC sidecar is not automatically rewritten unless `--rebuild-ec` is explicitly supplied, because doing so asserts that the current data bytes are trusted.
 
 ## Optimized metadata reads
 
@@ -283,7 +305,7 @@ zpaqoec oec_x compress path/to/file -to restore
 zpaqoec oec_e compress path/to/file
 ```
 
-`.000` contains metadata but deliberately omits compressed D blocks, so payload still comes from normal data parts. 0.4.2 does not yet bypass upstream multipart extraction with a fragment locator backend.
+`.000` contains metadata but deliberately omits compressed D blocks, so payload still comes from normal data parts. 0.5.0 does not yet bypass upstream multipart extraction with a fragment locator backend.
 
 ## EC commands
 
@@ -321,13 +343,13 @@ Windows / MSYS2 UCRT64:
 
 The Windows build runs runtime smoke gates for no-arg help, `oec_h`, `oec_version`, and argument-sensitive `oecinit` dispatch before reporting success.
 
-0.4.2 also explicitly uses the Windows CRT `<io.h>` / `<sys/stat.h>` directory APIs for JSON/MD5 filesystem traversal. This fixes current MSYS2 UCRT64 builds where `_finddata64_t` is not a complete public type spelling; OEC uses `_finddata_t` because traversal only needs file names and attributes.
+0.5.0 also explicitly uses the Windows CRT `<io.h>` / `<sys/stat.h>` directory APIs for JSON/MD5 filesystem traversal. This fixes current MSYS2 UCRT64 builds where `_finddata64_t` is not a complete public type spelling; OEC uses `_finddata_t` because traversal only needs file names and attributes.
 
 Current identity:
 
 ```text
 zpaqoec oec_version
-zpaqoec OEC overlay 0.4.2 (Optimize + Error Correction)
+zpaqoec OEC overlay 0.5.0 (Optimize + Error Correction)
 ```
 
 ## Tests
@@ -337,6 +359,8 @@ g++ -std=c++11 -O2 src/zfec_cli.cpp -o zfec
 ./tests/run_injector_tests.sh
 ./tests/run_ec_tests.sh
 ./tests/run_oec_a_tests.sh
+./tests/run_chunk_compat_tests.sh
+./tests/run_maintenance_tests.sh
 ./tests/run_oecinit_tests.sh
 ./tests/run_oec_command_tests.sh
 ./tests/run_idx_tests.sh
@@ -346,4 +370,9 @@ g++ -std=c++11 -O2 src/zfec_cli.cpp -o zfec
 
 ### zpaqfranz list-format compatibility
 
-0.4.2 accepts multiple `-terse` layouts and falls back to `-all -terse` + current-state collapse when necessary.
+0.5.0 accepts multiple `-terse` layouts and falls back to `-all -terse` + current-state collapse when necessary.
+
+
+## Deep IDX dedup (0.5.0)
+
+`oec_a` enables deep dedup automatically when an IDX2 cache is available. Lookup order is RAM hot cache -> mmap FRAGMENT_TABLE -> SSD/NVMe. `--idx-memory auto` is the default; use `--idx-memory 0`, `--idx-memory 512M`, `--idx-memory 8G`, etc. Generation-based publication makes commit O(1): new fragment slots are visible inside the current add but are not published to a later process until the native ZPAQ transaction reaches its normal return path. A crash leaves an uncommitted generation which is ignored/reused later. Metadata refreshes preserve the deep EOF section. `--no-idx` disables deep lookup and uses upstream RAM dedup.

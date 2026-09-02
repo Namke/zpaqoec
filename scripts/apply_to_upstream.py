@@ -117,6 +117,61 @@ def inject_hook_at_matches(text: str, name: str, require_argc_argv: bool = True)
     return text, count, skipped
 
 
+
+def find_function_body_range(text: str, pattern: str):
+    m=re.search(pattern,text,re.M)
+    if not m: return None
+    brace=text.find('{',m.end())
+    if brace<0: return None
+    depth=0; in_str=False; in_chr=False; esc=False
+    i=brace
+    while i<len(text):
+        c=text[i]
+        if in_str:
+            if esc: esc=False
+            elif c=='\\': esc=True
+            elif c=='"': in_str=False
+        elif in_chr:
+            if esc: esc=False
+            elif c=='\\': esc=True
+            elif c=="'": in_chr=False
+        else:
+            if c=='"': in_str=True
+            elif c=="'": in_chr=True
+            elif c=='{': depth+=1
+            elif c=='}':
+                depth-=1
+                if depth==0: return m.start(), brace, i+1
+        i+=1
+    return None
+
+def patch_deep_jidac(text: str):
+    # Remove previous deep include/hooks for idempotence.
+    text=re.sub(r'(?m)^[ \t]*#include[ \t]+"extensions/oec_deep\.hpp"[ \t]*(?:\r?\n|$)','',text)
+    text=text.replace('/* ZPAQOEC_DEEP_COMMIT */ htinv.commit();','')
+    text=text.replace('OecHybridHTIndex htinv(', 'HTIndex htinv(')
+    r=find_function_body_range(text,r'(?m)^[ \t]*int[ \t]+Jidac::add[ \t]*\([ \t]*\)')
+    if not r: return text,0
+    start,brace,end=r
+    body=text[start:end]
+    old='HTIndex htinv(ht, ht.size()+(total_size>>(10+fragment))+vf.size());'
+    if old not in body:
+        # tolerate whitespace while requiring the exact constructor shape
+        mm=re.search(r'HTIndex\s+htinv\s*\(\s*ht\s*,\s*ht\.size\(\)\s*\+\s*\(total_size>>\(10\+fragment\)\)\s*\+\s*vf\.size\(\)\s*\)\s*;',body)
+        if not mm: return text,0
+        body=body[:mm.start()]+'OecHybridHTIndex htinv(ht, ht.size()+(total_size>>(10+fragment))+vf.size());'+body[mm.end():]
+    else:
+        body=body.replace(old,'OecHybridHTIndex htinv(ht, ht.size()+(total_size>>(10+fragment))+vf.size());',1)
+    # Commit only on normal return path(s) from Jidac::add.
+    body,n=re.subn(r'(?m)^([ \t]*)return\s+errors\s*;',r'\1/* ZPAQOEC_DEEP_COMMIT */ htinv.commit();\n\1return errors;',body)
+    if n==0: return text,0
+    text=text[:start]+body+text[end:]
+    # Include after HTIndex definition but immediately before Jidac::add().
+    pos=text.find(body[:min(len(body),80)])
+    if pos<0: pos=start
+    text=text[:pos]+'#include "extensions/oec_deep.hpp"\n'+text[pos:]
+    return text,1
+
 def main():
     ap = argparse.ArgumentParser(description='Inject OEC (Optimize + Error Correction) extension into zpaqfranz monolithic source')
     ap.add_argument('upstream', help='path to upstream zpaqfranz.cpp')
@@ -136,10 +191,12 @@ def main():
     shutil.copy2(here / 'oec_idx.hpp', extdir / 'oec_idx.hpp')
     shutil.copy2(here / 'oec_md5.hpp', extdir / 'oec_md5.hpp')
     shutil.copy2(here / 'zpaqfranz_ext.hpp', extdir / 'zpaqfranz_ext.hpp')
+    shutil.copy2(here / 'oec_deep.hpp', extdir / 'oec_deep.hpp')
 
     text = src.read_text(errors='surrogateescape')
     original = text
     text = remove_legacy(text)
+    text, deep_count = patch_deep_jidac(text)
 
     internal = find_function_matches(text, 'zpaq_main_internal')
     mains = find_function_matches(text, 'main')
@@ -184,6 +241,7 @@ def main():
     changed = (text != original)
     print(f'{"patched" if changed else "already patched"}: {out}')
     print(f'extensions: {extdir}')
+    print(f'OEC deep Jidac hook: {deep_count}')
     print(f'OEC dispatch targets: main={main_count} zpaq_main_internal={internal_count} '
           f'(skipped no-argv: main={main_skipped} internal={internal_skipped})')
 
