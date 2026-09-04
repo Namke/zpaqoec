@@ -11,6 +11,7 @@ printf '#include "extensions/zpaqfranz_ext.hpp"\n' | cat - "$TMP/fake.cpp" > "$T
 mv "$TMP/legacy.cpp" "$TMP/fake.cpp"
 python3 "$ROOT/scripts/apply_to_upstream.py" "$TMP/fake.cpp" >/dev/null
 [ -f "$TMP/extensions/oec_md5.hpp" ]
+[ -f "$TMP/extensions/oec_cold.hpp" ]
 sed -i '0,/ZPAQFRANZ_OEC_DISPATCH/s//ZPAQFRANZ_TRUNKEC_DISPATCH/' "$TMP/fake.cpp"
 python3 "$ROOT/scripts/apply_to_upstream.py" "$TMP/fake.cpp" >/dev/null
 

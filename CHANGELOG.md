@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0 cold cross-part protection r6
+
+- Adds optional `oec_cold` adjunct protection for sealed/cold ZPAQ multipart sets without changing ZPAQ, ZFEC or IDX bytes.
+- Adds fully configurable systematic Reed-Solomon coding over GF(256): `--data K`, `--parity M`, `--shard-size`, `--grouping`, `--hash`, output/manifest roots and replica count.
+- Presets are convenience only: balanced=20+2, safe=20+3, space=32+2; explicit K/M always win.
+- `oec_cold seal|verify|repair|info|recover-manifest`; repair reconstructs only damaged/missing data parts and regenerates damaged parity groups.
+- OECOLD1 manifest records data/parity roots, exact file sizes, per-shard CRC32C and optional whole-file SHA-256; manifest itself is SHA-256 protected.
+- OECPAR1 parity files are independent per protection group. Data, parity, primary manifest and replicas may live in separate fault domains.
+- `--drop-part-ec` removes hot per-part `.ec` only after successful seal+verify.
+- Windows Unicode path model remains UTF-8 internally / UTF-16 at OS boundaries.
+
+
 ## 0.5.0 Windows UTF-8 path hotfix r5
 
 - Restores native zpaqfranz-style Unicode path handling across the OEC layer on Windows.

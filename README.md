@@ -388,3 +388,22 @@ g++ -std=c++11 -O2 src/zfec_cli.cpp -o zfec
 ### Windows Unicode path parity (r5)
 
 OEC now keeps zpaqfranz's UTF-8 path model across its own ignore/EC/IDX/JSON helpers and converts to UTF-16 Win32 filesystem/process APIs at OS boundaries. Unicode source paths such as `Kỳ's World (R.A.N.D)` no longer pass through narrow `_findfirst/_spawnv` APIs.
+
+### Cold cross-part protection (r6)
+
+`oec_cold` is optional and does not alter ZPAQ parts. Seal a completed multipart set with cross-part Reed-Solomon parity:
+
+```bash
+zpaqoec oec_cold seal "Documents?????.zpaq"
+zpaqoec oec_cold seal "Documents?????.zpaq" --profile safe
+zpaqoec oec_cold seal "Documents?????.zpaq" --data 24 --parity 4 --shard-size 1M --grouping size
+```
+
+Verify and repair from the manifest:
+
+```bash
+zpaqoec oec_cold verify Documents.oecp/Documents.oecmanifest
+zpaqoec oec_cold repair Documents.oecp/Documents.oecmanifest
+```
+
+Data/parity/manifest may be placed on separate storage with `--output`, `--manifest`, `--manifest-copy-dir`, and later relocated with `--data-root`/`--parity-root`. See `docs/OEC_COLD_FORMAT.md`.

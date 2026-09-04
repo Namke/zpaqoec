@@ -3,6 +3,7 @@
 #include "zfec.hpp"
 #include "oec_idx.hpp"
 #include "oec_md5.hpp"
+#include "oec_cold.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -1075,6 +1076,97 @@ inline bool oec_collect_archive_parts(const OecReadLayout& layout,std::vector<st
   return true;
 }
 
+
+inline std::string oec_cold_set_name(const std::string& spec,const OecReadLayout& layout) {
+  std::string n;
+  if(spec.find('?')!=std::string::npos){PatternParts pp;std::string e;if(parse_qmark_pattern(spec,pp,e))n=oeccold::basename(pp.prefix);}
+  if(n.empty())n=oeccold::basename(layout.single?layout.pattern:spec);
+  if(oec_ascii_ieq_suffix(n,".zpaq"))n.resize(n.size()-5);
+  while(!n.empty()&&(n[n.size()-1]=='.'||n[n.size()-1]=='_'||n[n.size()-1]=='-'||n[n.size()-1]==' '))n.resize(n.size()-1);
+  return n.empty()?std::string("archive"):n;
+}
+
+inline void oec_cold_usage(const char* exe) {
+  const char* p=(exe&&*exe)?exe:"zpaqoec";
+  std::fprintf(stdout,
+    "OEC cold cross-part protection (OECOLD1 / OECPAR1)\n"
+    "  %s oec_cold seal ARCHIVE [--profile balanced|safe|space|custom]\n"
+    "       [--data K] [--parity M] [--shard-size SIZE] [--grouping size|sequential]\n"
+    "       [--hash sha256|none] [--output DIR] [--manifest PATH]\n"
+    "       [--manifest-copies N] [--manifest-copy-dir DIR] [--no-index]\n"
+    "       [--drop-part-ec] [--force] [--no-verify]\n"
+    "  %s oec_cold verify MANIFEST [--data-root DIR] [--parity-root DIR] [--verbose]\n"
+    "  %s oec_cold repair MANIFEST [--data-root DIR] [--parity-root DIR] [--no-install]\n"
+    "  %s oec_cold info MANIFEST\n"
+    "  %s oec_cold recover-manifest PRIMARY --from REPLICA [--force]\n",
+    p,p,p,p,p);
+}
+
+inline bool oec_cold_parse_u32(const std::string& s,uint32_t& out){uint64_t n=0;if(!oeccold::parse_u64(s,n)||n>0xffffffffu)return false;out=(uint32_t)n;return true;}
+
+inline int oec_cold_command(int argc,const char* const* argv) {
+  if(argc<3){oec_cold_usage(argc?argv[0]:0);return 2;}
+  const std::string action=argv[2]?argv[2]:"";
+  if(action=="help"||action=="h"){oec_cold_usage(argv[0]);return 0;}
+  if(action=="seal") {
+    if(argc<4){oec_cold_usage(argv[0]);return 2;}
+    const std::string spec=argv[3];
+    oeccold::SealOptions opt;
+    // Profile is a convenience baseline; explicit K/M options always win,
+    // independent of CLI ordering.
+    for(int i=4;i<argc;++i)if(std::string(argv[i])=="--profile"&&i+1<argc)opt.profile=argv[i+1];
+    if(opt.profile=="balanced"||opt.profile=="custom"){opt.k=20;opt.m=2;}
+    else if(opt.profile=="safe"){opt.k=20;opt.m=3;}
+    else if(opt.profile=="space"){opt.k=32;opt.m=2;}
+    else {std::fprintf(stderr,"oec_cold: bad --profile\n");return 2;}
+    uint32_t digits=3;bool include_index=true,verbose=false;
+    for(int i=4;i<argc;++i){std::string a=argv[i];
+      if(a=="--profile"){++i;}
+      else if(a=="--data"&&i+1<argc){if(!oec_cold_parse_u32(argv[++i],opt.k)){std::fprintf(stderr,"oec_cold: bad --data\n");return 2;}}
+      else if(a=="--parity"&&i+1<argc){if(!oec_cold_parse_u32(argv[++i],opt.m)){std::fprintf(stderr,"oec_cold: bad --parity\n");return 2;}}
+      else if(a=="--shard-size"&&i+1<argc){uint64_t n=0;if(!oeccold::parse_size(argv[++i],n)){std::fprintf(stderr,"oec_cold: bad --shard-size\n");return 2;}opt.shard=n;}
+      else if(a=="--grouping"&&i+1<argc)opt.grouping=argv[++i];
+      else if(a=="--hash"&&i+1<argc)opt.hash_alg=argv[++i];
+      else if(a=="--output"&&i+1<argc)opt.output=argv[++i];
+      else if(a=="--manifest"&&i+1<argc)opt.manifest=argv[++i];
+      else if(a=="--manifest-copies"&&i+1<argc){if(!oec_cold_parse_u32(argv[++i],opt.copies)){std::fprintf(stderr,"oec_cold: bad --manifest-copies\n");return 2;}}
+      else if(a=="--manifest-copy-dir"&&i+1<argc)opt.copy_dir=argv[++i];
+      else if(a=="--digits"&&i+1<argc){if(!oec_cold_parse_u32(argv[++i],digits)||digits<1||digits>9){std::fprintf(stderr,"oec_cold: bad --digits\n");return 2;}}
+      else if(a=="--include-index")include_index=true;
+      else if(a=="--no-index")include_index=false;
+      else if(a=="--drop-part-ec")opt.drop_part_ec=true;
+      else if(a=="--force")opt.force=true;
+      else if(a=="--no-verify")opt.verify_after=false;
+      else if(a=="--verbose")verbose=true;
+      else {std::fprintf(stderr,"oec_cold: unknown seal option %s\n",a.c_str());return 2;}
+    }
+    std::string err; if(!oeccold::valid_options(opt,err)){std::fprintf(stderr,"oec_cold: %s\n",err.c_str());return 2;}
+    OecReadLayout layout;if(!resolve_oec_read_layout(spec,digits,"",layout,err)){std::fprintf(stderr,"oec_cold: %s\n",err.c_str());return 2;}
+    std::vector<std::string> parts;if(!oec_collect_archive_parts(layout,parts,err)){std::fprintf(stderr,"oec_cold: %s\n",err.c_str());return 2;}
+    if(include_index&&path_exists(layout.index))parts.push_back(layout.index); else if(include_index)std::fprintf(stdout,"oec_cold: zero index not found; sealing data parts only: %s\n",layout.index.c_str());
+    const std::string data_root=oeccold::dirname(parts[0]),setname=oec_cold_set_name(spec,layout);std::string mp;
+    if(!oeccold::seal(parts,data_root,setname,opt,mp,err)){std::fprintf(stderr,"oec_cold: seal failed: %s\n",err.c_str());return 3;}
+    std::fprintf(stdout,"oec_cold: manifest %s\n",mp.c_str());
+    if(opt.verify_after){oeccold::Manifest m;std::string used;if(!oeccold::load_manifest(mp,m,used,err)){std::fprintf(stderr,"oec_cold: post-seal manifest load failed: %s\n",err.c_str());return 4;}oeccold::RootOverride ro;oeccold::VerifySummary vs;bool healthy=oeccold::verify(m,ro,vs,err,verbose);std::fprintf(stdout,"oec_cold: verify groups=%llu stripes=%llu bad_data=%llu bad_parity=%llu bad_hash=%llu unrecoverable=%llu\n",(unsigned long long)vs.groups,(unsigned long long)vs.stripes,(unsigned long long)vs.bad_data,(unsigned long long)vs.bad_parity,(unsigned long long)vs.bad_hash,(unsigned long long)vs.unrecoverable);if(!healthy){std::fprintf(stderr,"oec_cold: post-seal verify failed: %s\n",err.c_str());return 4;}}
+    if(opt.drop_part_ec){for(size_t i=0;i<parts.size();++i){std::string ec=zfec::default_ec_path(parts[i]);if(path_exists(ec)){if(zfec::remove_utf8(ec)!=0){std::fprintf(stderr,"oec_cold: sealed OK but cannot remove %s\n",ec.c_str());return 5;}std::fprintf(stdout,"oec_cold: removed hot EC %s\n",ec.c_str());}}}
+    return 0;
+  }
+  if(action=="verify"||action=="repair"||action=="info") {
+    if(argc<4){oec_cold_usage(argv[0]);return 2;}std::string target=argv[3],err,used;oeccold::RootOverride ro;bool verbose=false;
+    for(int i=4;i<argc;++i){std::string a=argv[i];if(a=="--data-root"&&i+1<argc)ro.data_root=argv[++i];else if(a=="--parity-root"&&i+1<argc)ro.parity_root=argv[++i];else if(a=="--no-install"&&action=="repair")ro.no_install=true;else if(a=="--verbose")verbose=true;else{std::fprintf(stderr,"oec_cold: unknown %s option %s\n",action.c_str(),a.c_str());return 2;}}
+    oeccold::Manifest m;if(!oeccold::load_manifest(target,m,used,err)){std::fprintf(stderr,"oec_cold: %s\n",err.c_str());return 3;}
+    if(action=="info"){oeccold::info(m,used);return 0;}
+    if(action=="verify"){oeccold::VerifySummary vs;bool ok=oeccold::verify(m,ro,vs,err,verbose);std::fprintf(stdout,"oec_cold: verify groups=%llu stripes=%llu missing_data=%llu missing_parity=%llu bad_data=%llu bad_parity=%llu bad_hash=%llu unrecoverable=%llu\n",(unsigned long long)vs.groups,(unsigned long long)vs.stripes,(unsigned long long)vs.missing_data,(unsigned long long)vs.missing_parity,(unsigned long long)vs.bad_data,(unsigned long long)vs.bad_parity,(unsigned long long)vs.bad_hash,(unsigned long long)vs.unrecoverable);if(ok)return 0;if(!err.empty())std::fprintf(stderr,"oec_cold: %s\n",err.c_str());return vs.unrecoverable?3:2;}
+    if(!oeccold::repair(m,ro,err)){std::fprintf(stderr,"oec_cold: repair failed: %s\n",err.c_str());return 3;}
+    if(!ro.no_install){oeccold::VerifySummary vs;std::string e2;if(!oeccold::verify(m,ro,vs,e2,verbose)){std::fprintf(stderr,"oec_cold: repair completed but post-verify failed: %s\n",e2.c_str());return 4;}}
+    std::fprintf(stdout,"oec_cold: repair complete%s\n",ro.no_install?" (.repaired outputs not installed)":"");return 0;
+  }
+  if(action=="recover-manifest") {
+    if(argc<4){oec_cold_usage(argv[0]);return 2;}std::string dst=argv[3],src;bool force=false;for(int i=4;i<argc;++i){std::string a=argv[i];if(a=="--from"&&i+1<argc)src=argv[++i];else if(a=="--force")force=true;else{std::fprintf(stderr,"oec_cold: unknown recover-manifest option %s\n",a.c_str());return 2;}}if(src.empty()){std::fprintf(stderr,"oec_cold: recover-manifest requires --from REPLICA\n");return 2;}if(path_exists(dst)&&!force){std::fprintf(stderr,"oec_cold: destination exists (use --force): %s\n",dst.c_str());return 2;}std::string txt,err;if(!oeccold::read_all(src,txt)){std::fprintf(stderr,"oec_cold: cannot read replica %s\n",src.c_str());return 3;}oeccold::Manifest m;if(!oeccold::parse_manifest_text(txt,m,err)){std::fprintf(stderr,"oec_cold: invalid replica: %s\n",err.c_str());return 3;}if(!oeccold::write_atomic(dst,txt,err)){std::fprintf(stderr,"oec_cold: %s\n",err.c_str());return 3;}std::fprintf(stdout,"oec_cold: restored manifest %s from %s\n",dst.c_str(),src.c_str());return 0;
+  }
+  oec_cold_usage(argv[0]);return 2;
+}
+
 inline int oec_ec_verify_file(const std::string& file,bool verbose,OecEcCheckResult& sum,bool print=true) {
   ++sum.files; const std::string ec=zfec::default_ec_path(file);
   if(!path_exists(ec)){++sum.missing_ec;if(print)std::fprintf(stdout,"MISSING-EC %s -> %s\n",file.c_str(),ec.c_str());return 2;}
@@ -2119,6 +2211,7 @@ inline void oec_quick_help(const char* exe) {
     "  oec_e ARCHIVE [files/options]   OEC equivalent of native e\n"
     "  oec_idx build|verify|info|ensure|upgrade|rebuild|drop  mmap SSD cache manager\n"
     "  oec_check | oec_verify ARCHIVE  verify every part/EC + .000 EC + IDX (read-only)\n"
+    "  oec_cold seal|verify|repair|info cross-part cold Reed-Solomon protection\n"
     "  oec_fix ARCHIVE                repair EC-recoverable parts and self-heal .000/IDX\n"
     "  oec_json | oec_j ARCHIVE       write JSON catalog; --force-md5 hashes extracted payload\n"
     "  ec create|verify|repair|info    independent EC sidecar operations\n"
@@ -2168,6 +2261,7 @@ inline int dispatch_const(int argc, const char* const* argv) {
   if (cmd=="oec_version") { std::fprintf(stdout, "zpaqoec OEC overlay %s (Optimize + Error Correction)\n", kOecOverlayVersion); return 0; }
   if (cmd=="ec") return zfec::cli(argc-1, argv+1);
   if (cmd=="oec_idx") return oec_idx_command(argc, argv);
+  if (cmd=="oec_cold") return oec_cold_command(argc, argv);
   if (cmd=="oec_check" || cmd=="oec_verify") return oec_maintenance_command(argc, argv, false);
   if (cmd=="oec_fix") return oec_maintenance_command(argc, argv, true);
   if (cmd=="oec_json" || cmd=="oec_j") return oec_json_command(argc, argv);

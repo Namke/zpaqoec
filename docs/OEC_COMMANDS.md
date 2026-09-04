@@ -553,3 +553,66 @@ zpaqoec e ...
 ```
 
 These retain upstream behavior and are useful as a compatibility/regression baseline.
+
+
+## `oec_cold` — optional cross-part cold protection
+
+Seal a completed multipart archive. The ZPAQ parts remain byte-for-byte untouched.
+
+```bash
+# balanced default: max 20 data lanes + 2 parity lanes
+zpaqoec oec_cold seal "Documents?????.zpaq"
+
+# convenience presets
+zpaqoec oec_cold seal "Documents?????.zpaq" --profile safe   # 20+3
+zpaqoec oec_cold seal "Documents?????.zpaq" --profile space  # 32+2
+
+# fully custom; explicit K/M overrides the profile
+zpaqoec oec_cold seal "Documents?????.zpaq" \
+  --profile safe --data 24 --parity 4 --shard-size 1M --grouping size
+```
+
+Coding/storage options:
+
+```text
+--profile balanced|safe|space|custom
+--data K                 1..128
+--parity M               1..32, K+M <= 255
+--shard-size SIZE        power-of-two 64K..16M
+--grouping size|sequential
+--hash sha256|none       CRC32C per shard is always stored
+--output DIR             parity root
+--manifest PATH          primary manifest
+--manifest-copies N      0..32 (default 2)
+--manifest-copy-dir DIR  optional separate fault domain
+--include-index | --no-index
+--drop-part-ec
+--force
+--no-verify
+```
+
+Verify/info/repair:
+
+```bash
+zpaqoec oec_cold info   X:/Meta/Documents.oecmanifest
+zpaqoec oec_cold verify X:/Meta/Documents.oecmanifest
+zpaqoec oec_cold repair X:/Meta/Documents.oecmanifest
+```
+
+After relocating storage, override roots without editing the manifest:
+
+```bash
+zpaqoec oec_cold verify X:/Meta/Documents.oecmanifest \
+  --data-root E:/ColdData --parity-root F:/ColdParity
+```
+
+`repair --no-install` writes `<part>.repaired` and leaves the original untouched. Normal repair preserves a damaged original as `<part>.oec-bad[.N]` before installing the reconstructed bytes. Damaged/missing parity files are regenerated after data repair.
+
+The default `.000` zero index is included when present; use `--no-index` to exclude it. `--drop-part-ec` is intentionally ordered after successful cold seal and verification, so hot `.ec` files are never removed before the cold protection is known-good.
+
+If the primary manifest is lost and replicas were placed elsewhere:
+
+```bash
+zpaqoec oec_cold recover-manifest X:/Meta/Documents.oecmanifest \
+  --from Z:/MetaBackup/Documents.oecmanifest.copy1
+```

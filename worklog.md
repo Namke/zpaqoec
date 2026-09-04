@@ -1,5 +1,10 @@
 # Worklog
 
+## 0.5.0 r6 - optional cold cross-part Reed-Solomon
+
+Implemented OECOLD1/OECPAR1 as an adjunct cold-archive layer. Groups are balanced to avoid pathological one-file tail groups; `size` grouping sorts by size before balanced partitioning to reduce padding. The coding matrix is a systematic form of a Vandermonde RS generator over GF(256), supporting arbitrary K/M within the implementation bounds. Per-shard CRC32C locates bitrot and optional SHA-256 covers whole files. Repair preflights every stripe and refuses writes when fewer than K good shards remain.
+
+
 ## 0.5.0 r5 - Windows Unicode filesystem parity
 
 A real Windows add exposed that OEC ignore preprocessing used MinGW narrow `_findfirst/_stat64`, while native zpaqfranz operates on Unicode-capable paths. The failure surfaced while recursively enumerating `W:/Documents/Obsidian/Namke/Projects/Kỳ's World (R.A.N.D)`. r5 moves the OEC filesystem boundary to UTF-8 internally + UTF-16 Win32 calls, including process spawning, EC/IDX/MD5/JSON helpers, and ignore traversal.
