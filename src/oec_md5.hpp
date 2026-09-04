@@ -49,7 +49,7 @@ struct Context {
 };
 
 inline bool file(const std::string& path,std::string& hex,std::string& err){
-  FILE* f=std::fopen(path.c_str(),"rb"); if(!f){err="cannot open source for MD5: "+path;return false;} Context c; unsigned char buf[1024*1024];
+  FILE* f=zfec::fopen_utf8(path,"rb"); if(!f){err="cannot open source for MD5: "+path;return false;} Context c; unsigned char buf[1024*1024];
   for(;;){size_t n=std::fread(buf,1,sizeof(buf),f); if(n)c.update(buf,n); if(n<sizeof(buf)){if(std::ferror(f)){std::fclose(f);err="read error while calculating MD5: "+path;return false;}break;}}
   std::fclose(f); unsigned char d[16];c.final(d);static const char* x="0123456789abcdef";hex.resize(32);for(int i=0;i<16;++i){hex[i*2]=x[d[i]>>4];hex[i*2+1]=x[d[i]&15];}return true;
 }

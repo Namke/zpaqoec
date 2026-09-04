@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0 Windows UTF-8 path hotfix r5
+
+- Restores native zpaqfranz-style Unicode path handling across the OEC layer on Windows.
+- Replaces narrow `_findfirst/_findnext` ignore/source walkers with `FindFirstFileW/FindNextFileW` and converts directory entries back to UTF-8.
+- Reconstructs OEC argv from `GetCommandLineW` before dispatch, so the injected bridge cannot consume an ANSI-mangled `main()` argv before upstream normalization.
+- Replaces Windows `_spawnv` for OEC child/native calls with `CreateProcessW`; Unicode source paths now survive the OEC -> native zpaqfranz handoff.
+- Adds shared UTF-8 filesystem wrappers for EC/IDX/MD5/JSON/state operations (`_wfopen`, `_wstat64`, wide rename/remove/mkdir/rmdir, `MoveFileExW`).
+- Adds regression coverage with `Kỳ's World (R.A.N.D)/日本語` paths plus static gates rejecting narrow Windows enumeration/spawn APIs.
+- No ZPAQ, EC, IDX or archive format changes.
+
 ## 0.5.0 deep IDX injector compatibility hotfix r2
 
 - Deep Jidac injector no longer hard-codes the exact `int Jidac::add()` signature or the historical `HTIndex htinv(...)` constructor expression.

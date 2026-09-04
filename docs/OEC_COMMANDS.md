@@ -246,6 +246,10 @@ x "compress.???" -index compress.000.oec-rebuild.tmp -force
 
 A single chunked add may create several physical parts. OEC discovers the complete newly-created contiguous range, protects **every** new part with its own `.ec`, updates `.ecstate` to the highest committed part, and never reopens the final short part from the previous add. For example, if one add creates parts `001..004`, the next add begins at `005`; part `004` remains immutable.
 
+### Windows Unicode paths
+
+OEC paths are UTF-8 internally, matching zpaq/zpaqfranz. On Windows, OEC converts filesystem and child-process boundaries to UTF-16 (`*W` APIs). Source/archive/cache paths may therefore contain Vietnamese, CJK and other Unicode characters without routing through the active ANSI code page. This applies to ignore traversal, EC sidecars, IDX caches, JSON/MD5 helpers, maintenance state and OEC-to-native child invocations.
+
 ### Recursive ignore filtering
 
 `oec_a` automatically checks every source folder for `zpaq.ignore`. The file uses Git-style patterns and applies recursively below that source root:

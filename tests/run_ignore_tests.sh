@@ -3,6 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$ROOT/tests/oec-ignore-test-run"
 rm -rf "$TMP"; mkdir -p "$TMP/extensions" "$TMP/src/build" "$TMP/src/logs/a"
+mkdir -p "$TMP/src/Obsidian/Namke/Projects/Kỳ's World (R.A.N.D)/日本語"
 cp "$ROOT/tests/fake_upstream.cpp" "$TMP/fake.cpp"
 python3 "$ROOT/scripts/apply_to_upstream.py" "$TMP/fake.cpp" --extension-dir "$TMP/extensions" >/dev/null
 g++ -std=c++11 -O2 "$TMP/fake.cpp" -o "$TMP/zpaqoec"
@@ -17,6 +18,8 @@ printf x > src/skip.bak
 printf x > src/keep.bak
 printf x > src/skip.cache
 printf x > src/keep.cache
+printf x > "src/Obsidian/Namke/Projects/Kỳ's World (R.A.N.D)/日本語/skip.tmp"
+printf x > "src/Obsidian/Namke/Projects/Kỳ's World (R.A.N.D)/日本語/giữ-lại.txt"
 mkdir -p src/nested
 printf x > src/rootonly.dat
 printf x > src/nested/rootonly.dat
@@ -42,6 +45,8 @@ grep -Fxq 'src/junk.tmp' fake_exclude_seen.txt
 grep -Fxq 'src/build' fake_exclude_seen.txt
 grep -Fxq 'src/logs/a/x.log' fake_exclude_seen.txt
 grep -Fxq 'src/rootonly.dat' fake_exclude_seen.txt
+grep -Fxq "src/Obsidian/Namke/Projects/Kỳ's World (R.A.N.D)/日本語/skip.tmp" fake_exclude_seen.txt
+! grep -Fxq "src/Obsidian/Namke/Projects/Kỳ's World (R.A.N.D)/日本語/giữ-lại.txt" fake_exclude_seen.txt
 ! grep -Fxq 'src/nested/rootonly.dat' fake_exclude_seen.txt
 ! grep -Fxq 'src/important.tmp' fake_exclude_seen.txt
 ! grep -Fxq 'src/keep.txt' fake_exclude_seen.txt

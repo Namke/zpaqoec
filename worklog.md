@@ -1,3 +1,11 @@
+# Worklog
+
+## 0.5.0 r5 - Windows Unicode filesystem parity
+
+A real Windows add exposed that OEC ignore preprocessing used MinGW narrow `_findfirst/_stat64`, while native zpaqfranz operates on Unicode-capable paths. The failure surfaced while recursively enumerating `W:/Documents/Obsidian/Namke/Projects/Kỳ's World (R.A.N.D)`. r5 moves the OEC filesystem boundary to UTF-8 internally + UTF-16 Win32 calls, including process spawning, EC/IDX/MD5/JSON helpers, and ignore traversal.
+
+Regression adds a Unicode nested tree with Vietnamese, apostrophe/parentheses, and Japanese names; ignored and retained files are both checked. All existing OEC suites pass after the change.
+
 ## 0.5.0 deep IDX injector hotfix r2
 
 Fixed the 64.8 build hard-gate false negative caused by exact-text matching of `Jidac::add()` and `HTIndex htinv(...)`. The injector and build gates now use semantic anchors and preserve upstream constructor syntax. Drift-fixture compile + OEC dispatcher smoke passes.

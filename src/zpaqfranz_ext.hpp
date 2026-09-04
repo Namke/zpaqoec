@@ -20,6 +20,7 @@
   // Windows CRT directory/file APIs used by OEC source walking and temp cleanup.
   // MinGW UCRT does not guarantee that zpaqfranz upstream includes these before
   // this extension, so include them explicitly here.
+  #include <windows.h>
   #include <io.h>
   #include <sys/stat.h>
   #include <process.h>
@@ -197,7 +198,7 @@ inline std::string oec_get_env_value(const char* name){const char*p=std::getenv(
 
 inline bool oec_read_first_password_line(const std::string& path, std::string& password, std::string& err) {
   password.clear(); err.clear();
-  FILE* f=std::fopen(path.c_str(),"rb");
+  FILE* f=zfec::fopen_utf8(path,"rb");
   if(!f) { err="cannot open password file"; return false; }
   char buf[65536];
   if(!std::fgets(buf,sizeof(buf),f)) { std::fclose(f); err="password file is empty/unreadable"; return false; }
@@ -241,7 +242,7 @@ inline void oec_password_folder_preflight(int argc, const char* const* argv) {
 inline std::string state_path(const std::string& base) { return base + ".ecstate"; }
 
 inline bool read_state(const std::string& base, uint64_t& last) {
-  FILE* f=std::fopen(state_path(base).c_str(), "rb");
+  FILE* f=zfec::fopen_utf8(state_path(base), "rb");
   if (!f) return false;
   char magic[16]={0}; unsigned long long v=0;
   bool ok = std::fgets(magic,sizeof(magic),f) && (std::strncmp(magic,"OECST1",6)==0 || std::strncmp(magic,"ZFEXT1",6)==0) && std::fscanf(f,"last_part=%llu",&v)==1;
@@ -252,12 +253,12 @@ inline bool read_state(const std::string& base, uint64_t& last) {
 
 inline bool write_state(const std::string& base, uint64_t last) {
   const std::string p=state_path(base), tmp=p+".tmp";
-  FILE* f=std::fopen(tmp.c_str(),"wb"); if(!f) return false;
+  FILE* f=zfec::fopen_utf8(tmp,"wb"); if(!f) return false;
   std::fprintf(f,"OECST1\nlast_part=%llu\n",(unsigned long long)last);
   std::fflush(f);
-  if(std::fclose(f)!=0){ std::remove(tmp.c_str()); return false; }
-  std::remove(p.c_str());
-  if(std::rename(tmp.c_str(),p.c_str())!=0){ std::remove(tmp.c_str()); return false; }
+  if(std::fclose(f)!=0){ zfec::remove_utf8(tmp); return false; }
+  zfec::remove_utf8(p);
+  if(zfec::rename_utf8(tmp,p)!=0){ zfec::remove_utf8(tmp); return false; }
   return true;
 }
 
@@ -269,6 +270,8 @@ inline uint64_t recover_last_part_by_names(const std::string& base, uint32_t dig
 }
 
 
+inline std::wstring oec_utf8_to_wide(const std::string& s);
+inline std::wstring oec_quote_win_arg(const std::wstring& a);
 inline int spawn_self(const std::string& exe, const std::vector<std::string>& args);
 
 inline bool oec_has_arg(const std::vector<std::string>& args,const char* name) {
@@ -286,7 +289,7 @@ inline bool oec_rebuild_zero_index(const std::string& exe,const std::string& dat
                                    const std::string& index,const std::vector<std::string>& auth,
                                    std::string& err) {
   const std::string tmp=index+".oec-rebuild.tmp";
-  std::remove(tmp.c_str());
+  zfec::remove_utf8(tmp);
   std::vector<std::string> child;
   child.push_back("x"); child.push_back(data_target);
   child.insert(child.end(),auth.begin(),auth.end());
@@ -294,49 +297,43 @@ inline bool oec_rebuild_zero_index(const std::string& exe,const std::string& dat
   std::fprintf(stdout,"oec: rebuilding authoritative zero-part %s from native archive bytes\n",index.c_str());
   std::fflush(stdout);
   const int rc=spawn_self(exe,child);
-  if(rc!=0){std::remove(tmp.c_str());std::ostringstream e;e<<"native index rebuild failed rc="<<rc;err=e.str();return false;}
+  if(rc!=0){zfec::remove_utf8(tmp);std::ostringstream e;e<<"native index rebuild failed rc="<<rc;err=e.str();return false;}
   if(!path_exists(tmp)){err="native index rebuild did not create "+tmp;return false;}
   const std::string bak=index+".oec-rebuild.bak";
   const bool had=path_exists(index);
-  if(had){std::remove(bak.c_str());if(std::rename(index.c_str(),bak.c_str())!=0){std::remove(tmp.c_str());err="cannot move old zero-part aside: "+index;return false;}}
-  if(std::rename(tmp.c_str(),index.c_str())!=0){if(had)std::rename(bak.c_str(),index.c_str());std::remove(tmp.c_str());err="cannot install rebuilt zero-part: "+index;return false;}
-  if(had)std::remove(bak.c_str());
+  if(had){zfec::remove_utf8(bak);if(zfec::rename_utf8(index,bak)!=0){zfec::remove_utf8(tmp);err="cannot move old zero-part aside: "+index;return false;}}
+  if(zfec::rename_utf8(tmp,index)!=0){if(had)zfec::rename_utf8(bak,index);zfec::remove_utf8(tmp);err="cannot install rebuilt zero-part: "+index;return false;}
+  if(had)zfec::remove_utf8(bak);
   return true;
 }
 
 inline int spawn_self(const std::string& exe, const std::vector<std::string>& args) {
-  std::vector<const char*> av;
-  av.reserve(args.size()+2);
-  av.push_back(exe.c_str());
-  for (size_t i=0;i<args.size();++i) av.push_back(args[i].c_str());
-  av.push_back(0);
 #if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
-  intptr_t r = _spawnv(_P_WAIT, exe.c_str(), av.data());
-  return r < 0 ? 127 : static_cast<int>(r);
+  // _spawnv is an ANSI-path boundary under MinGW/MSVCRT. Build the child
+  // command line from OEC's UTF-8 strings and launch through CreateProcessW so
+  // native zpaqfranz receives the same Unicode path that a direct invocation
+  // would receive.
+  std::wstring cmd=oec_quote_win_arg(oec_utf8_to_wide(exe));
+  for(size_t i=0;i<args.size();++i){cmd+=L" ";cmd+=oec_quote_win_arg(oec_utf8_to_wide(args[i]));}
+  std::vector<wchar_t> mutable_cmd(cmd.begin(),cmd.end()); mutable_cmd.push_back(0);
+  STARTUPINFOW si; PROCESS_INFORMATION pi; std::memset(&si,0,sizeof(si));std::memset(&pi,0,sizeof(pi));si.cb=sizeof(si);
+  const std::wstring wexe=oec_utf8_to_wide(exe);
+  BOOL ok=CreateProcessW(wexe.empty()?0:wexe.c_str(),mutable_cmd.data(),0,0,FALSE,0,0,0,&si,&pi);
+  if(!ok)return 127;
+  WaitForSingleObject(pi.hProcess,INFINITE);DWORD code=127;GetExitCodeProcess(pi.hProcess,&code);CloseHandle(pi.hThread);CloseHandle(pi.hProcess);return static_cast<int>(code);
 #else
+  std::vector<const char*> av;av.reserve(args.size()+2);av.push_back(exe.c_str());for(size_t i=0;i<args.size();++i)av.push_back(args[i].c_str());av.push_back(0);
   pid_t pid = fork();
   if (pid < 0) return 127;
-  if (pid == 0) {
-    execvp(exe.c_str(), const_cast<char* const*>(av.data()));
-    _exit(127);
-  }
-  int status=0;
-  if (waitpid(pid, &status, 0) < 0) return 127;
-  if (WIFEXITED(status)) return WEXITSTATUS(status);
-  if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
-  return 127;
+  if (pid == 0) {execvp(exe.c_str(), const_cast<char* const*>(av.data()));_exit(127);}
+  int status=0;if(waitpid(pid,&status,0)<0)return 127;if(WIFEXITED(status))return WEXITSTATUS(status);if(WIFSIGNALED(status))return 128+WTERMSIG(status);return 127;
 #endif
 }
 
 
 inline std::wstring oec_utf8_to_wide(const std::string& s) {
 #if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
-  if (s.empty()) return std::wstring();
-  int n=MultiByteToWideChar(CP_UTF8,0,s.c_str(),-1,0,0);
-  if(n<=0) return std::wstring();
-  std::vector<wchar_t> w(static_cast<size_t>(n));
-  MultiByteToWideChar(CP_UTF8,0,s.c_str(),-1,w.data(),n);
-  return std::wstring(w.data());
+  return zfec::utf8_to_wide(s,false);
 #else
   (void)s; return std::wstring();
 #endif
@@ -359,7 +356,7 @@ inline std::wstring oec_quote_win_arg(const std::wstring& a) {
 
 inline bool oec_file_looks_standard_aes_encrypted(const std::string& path, bool& encrypted, std::string& err) {
   encrypted=false; err.clear();
-  FILE* f=std::fopen(path.c_str(),"rb");
+  FILE* f=zfec::fopen_utf8(path,"rb");
   if(!f){ err="cannot open archive/index for encryption probe: "+path; return false; }
   const int c=std::fgetc(f); std::fclose(f);
   if(c==EOF){ err="cannot probe empty archive/index: "+path; return false; }
@@ -689,7 +686,7 @@ inline int oec_a(int argc, const char* const* argv) {
   }
   const int rc=spawn_self(exe, child);
   if(deep_enabled){oec_set_env_value("ZPAQOEC_DEEP_IDX","");oec_set_env_value("ZPAQOEC_IDX_MEMORY","");}
-  if(!ignore_exclude_file.empty()) std::remove(ignore_exclude_file.c_str());
+  if(!ignore_exclude_file.empty()) zfec::remove_utf8(ignore_exclude_file);
   if (rc!=0) { std::fprintf(stderr,"oec_a: zpaq add failed rc=%d; EC not written\n",rc); return rc; }
 
   std::vector<std::string> new_parts;
@@ -778,15 +775,15 @@ inline bool replace_file_safely(const std::string& tmp, const std::string& dst, 
   const std::string bak = dst + ".oecinit.bak";
   const bool had = path_exists(dst);
   if (had) {
-    std::remove(bak.c_str());
-    if (std::rename(dst.c_str(), bak.c_str()) != 0) { err = "cannot move old index aside: " + dst; return false; }
+    zfec::remove_utf8(bak);
+    if (zfec::rename_utf8(dst,bak) != 0) { err = "cannot move old index aside: " + dst; return false; }
   }
-  if (std::rename(tmp.c_str(), dst.c_str()) != 0) {
-    if (had) std::rename(bak.c_str(), dst.c_str());
+  if (zfec::rename_utf8(tmp,dst) != 0) {
+    if (had) zfec::rename_utf8(bak,dst);
     err = "cannot install rebuilt index: " + dst;
     return false;
   }
-  if (had) std::remove(bak.c_str());
+  if (had) zfec::remove_utf8(bak);
   return true;
 }
 
@@ -869,7 +866,7 @@ inline int oecinit(int argc, const char* const* argv) {
       std::fprintf(stdout,"oecinit: reusing existing zero-part index %s (use --force to rebuild)\n",index.c_str());
     } else {
       const std::string tmpindex=index+".oecinit.tmp";
-      std::remove(tmpindex.c_str());
+      zfec::remove_utf8(tmpindex);
       std::vector<std::string> child;
       child.push_back("x"); child.push_back(single_data);
       child.insert(child.end(),readopts.begin(),readopts.end());
@@ -877,7 +874,7 @@ inline int oecinit(int argc, const char* const* argv) {
       std::fprintf(stdout,"oecinit: rebuilding zero-part index %s from single archive %s\n",index.c_str(),single_data.c_str());
       const int rc=spawn_self(exe,child);
       if(rc!=0) {
-        std::remove(tmpindex.c_str());
+        zfec::remove_utf8(tmpindex);
         std::fprintf(stderr,"oecinit: single archive EC is ready, but zero-part index rebuild failed rc=%d; original archive was not modified\n",rc);
         return rc;
       }
@@ -899,7 +896,7 @@ inline int oecinit(int argc, const char* const* argv) {
     } else {
       // Build to a temporary path. Native `x -index` reads archive metadata but does not extract files.
       const std::string tmpindex = index + ".oecinit.tmp";
-      std::remove(tmpindex.c_str());
+      zfec::remove_utf8(tmpindex);
       std::vector<std::string> child;
       child.push_back("x"); child.push_back(pattern);
       child.insert(child.end(), readopts.begin(), readopts.end());
@@ -908,7 +905,7 @@ inline int oecinit(int argc, const char* const* argv) {
       std::fprintf(stdout,"oecinit: rebuilding index %s from %s\n",index.c_str(),pattern.c_str());
       const int rc = spawn_self(exe, child);
       if (rc != 0) {
-        std::remove(tmpindex.c_str());
+        zfec::remove_utf8(tmpindex);
         std::fprintf(stderr,"oecinit: native index rebuild failed rc=%d; archive parts were not modified\n",rc);
         return rc;
       }
@@ -1097,8 +1094,8 @@ inline std::string oec_unique_bad_backup(const std::string& file) {
 
 inline bool oec_install_repaired_data(const std::string& file,const std::string& repaired,std::string& backup,std::string& err) {
   backup=oec_unique_bad_backup(file);
-  if(std::rename(file.c_str(),backup.c_str())!=0){err="cannot preserve damaged file as "+backup;return false;}
-  if(std::rename(repaired.c_str(),file.c_str())!=0){std::rename(backup.c_str(),file.c_str());err="cannot install repaired file "+file;return false;}
+  if(zfec::rename_utf8(file,backup)!=0){err="cannot preserve damaged file as "+backup;return false;}
+  if(zfec::rename_utf8(repaired,file)!=0){zfec::rename_utf8(backup,file);err="cannot install repaired file "+file;return false;}
   return true;
 }
 
@@ -1117,11 +1114,11 @@ inline bool oec_fix_one_ec_file(const std::string& file,const zfec::Options& eco
   }
   if(st.unrecoverable_stripes || st.size_mismatch || st.ec_corrupt){std::ostringstream e;e<<"unrecoverable EC/data damage in "<<file<<" (unrecoverable="<<st.unrecoverable_stripes<<", size_mismatch="<<(st.size_mismatch?"yes":"no")<<")";err=e.str();return false;}
   if(st.bad_data_shards){
-    const std::string tmp=file+".oec-repair.tmp";std::remove(tmp.c_str());
-    if(!zfec::repair(file,ec,tmp,err,verbose)){std::remove(tmp.c_str());return false;}
+    const std::string tmp=file+".oec-repair.tmp";zfec::remove_utf8(tmp);
+    if(!zfec::repair(file,ec,tmp,err,verbose)){zfec::remove_utf8(tmp);return false;}
     zfec::VerifyStats post;std::string verr;
-    if(!zfec::verify(tmp,ec,post,verr,verbose)||post.bad_data_shards||post.bad_parity_shards||post.unrecoverable_stripes||post.size_mismatch||post.ec_corrupt){std::remove(tmp.c_str());err="post-repair verification failed for "+file+(verr.empty()?std::string():std::string(": ")+verr);return false;}
-    std::string backup;if(!oec_install_repaired_data(file,tmp,backup,err)){std::remove(tmp.c_str());return false;}
+    if(!zfec::verify(tmp,ec,post,verr,verbose)||post.bad_data_shards||post.bad_parity_shards||post.unrecoverable_stripes||post.size_mismatch||post.ec_corrupt){zfec::remove_utf8(tmp);err="post-repair verification failed for "+file+(verr.empty()?std::string():std::string(": ")+verr);return false;}
+    std::string backup;if(!oec_install_repaired_data(file,tmp,backup,err)){zfec::remove_utf8(tmp);return false;}
     ++repaired;std::fprintf(stdout,"oec_fix: repaired %s; damaged original preserved as %s\n",file.c_str(),backup.c_str());return true;
   }
   if(st.bad_parity_shards){
@@ -1245,7 +1242,7 @@ inline std::string oec_dirname(std::string p) {
 }
 
 inline bool oec_read_text_lines(const std::string& path,std::vector<std::string>& lines,std::string& err) {
-  lines.clear(); FILE* f=std::fopen(path.c_str(),"rb"); if(!f){err="cannot open ignore file: "+path;return false;}
+  lines.clear(); FILE* f=zfec::fopen_utf8(path,"rb"); if(!f){err="cannot open ignore file: "+path;return false;}
   std::string cur; char buf[4096];
   while(std::fgets(buf,sizeof(buf),f)) {
     cur += buf;
@@ -1407,12 +1404,12 @@ inline std::string oec_native_source_path(const std::string& root,const std::str
 inline bool oec_scan_ignore_root(const std::string& root,const std::string& rel,const std::vector<OecIgnoreRule>& rules,OecIgnorePlan& plan,std::string& err) {
   const std::string here=rel.empty()?root:oec_path_join(root,rel);
 #if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
-  std::string pat=oec_path_join(here,"*"); struct _finddata_t fd; intptr_t h=_findfirst(pat.c_str(),&fd);
-  if(h==-1){err="cannot enumerate source directory for ignore filtering: "+here;return false;}
-  do { std::string n=fd.name;if(n=="."||n=="..")continue;std::string r=rel.empty()?n:oec_path_join(rel,n),full=oec_path_join(root,r);bool dir=(fd.attrib&_A_SUBDIR)!=0;
-    if(dir){ if(oec_ignore_path(rules,oec_norm_relpath(r),true)){plan.native_excludes.push_back(oec_native_source_path(root,r));++plan.ignored_dirs;} else if(!oec_scan_ignore_root(root,r,rules,plan,err)){_findclose(h);return false;} }
+  const std::string pat=oec_path_join(here,"*"); const std::wstring wpat=zfec::utf8_to_wide(pat,true); WIN32_FIND_DATAW fd; HANDLE h=wpat.empty()?INVALID_HANDLE_VALUE:FindFirstFileW(wpat.c_str(),&fd);
+  if(h==INVALID_HANDLE_VALUE){err="cannot enumerate source directory for ignore filtering: "+here;return false;}
+  do { std::string n=zfec::wide_to_utf8(fd.cFileName);if(n=="."||n=="..")continue;std::string r=rel.empty()?n:oec_path_join(rel,n),full=oec_path_join(root,r);bool dir=(fd.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)!=0;
+    if(dir){ if(oec_ignore_path(rules,oec_norm_relpath(r),true)){plan.native_excludes.push_back(oec_native_source_path(root,r));++plan.ignored_dirs;} else if(!oec_scan_ignore_root(root,r,rules,plan,err)){FindClose(h);return false;} }
     else {++plan.scanned_files;if(oec_ignore_path(rules,oec_norm_relpath(r),false)){plan.native_excludes.push_back(oec_native_source_path(root,r));++plan.ignored_files;} else {OecIgnoreFile f;f.source_root=root;f.rel=oec_norm_relpath(r);f.full=full;plan.allowed_files.push_back(f);}}
-  }while(_findnext(h,&fd)==0);_findclose(h);return true;
+  }while(FindNextFileW(h,&fd));FindClose(h);return true;
 #else
   DIR* d=opendir(here.c_str());if(!d){err="cannot enumerate source directory for ignore filtering: "+here;return false;}struct dirent* de;
   while((de=readdir(d))!=0){std::string n=de->d_name;if(n=="."||n=="..")continue;std::string r=rel.empty()?n:oec_path_join(rel,n),full=oec_path_join(root,r);int kind=oec_path_kind(full);
@@ -1457,14 +1454,14 @@ inline std::string oec_ignore_temp_path() {
 }
 
 inline bool oec_write_ignore_exclude_file(const OecIgnorePlan& plan,std::string& path,std::string& err) {
-  path.clear();if(!plan.active||plan.native_excludes.empty())return true;path=oec_ignore_temp_path();FILE* f=std::fopen(path.c_str(),"wb");if(!f){err="cannot create temporary native exclude list: "+path;return false;}
-  for(size_t i=0;i<plan.native_excludes.size();++i)if(std::fprintf(f,"%s\n",plan.native_excludes[i].c_str())<0){std::fclose(f);std::remove(path.c_str());err="cannot write temporary native exclude list: "+path;return false;}
-  if(std::fclose(f)!=0){std::remove(path.c_str());err="cannot close temporary native exclude list: "+path;return false;}return true;
+  path.clear();if(!plan.active||plan.native_excludes.empty())return true;path=oec_ignore_temp_path();FILE* f=zfec::fopen_utf8(path,"wb");if(!f){err="cannot create temporary native exclude list: "+path;return false;}
+  for(size_t i=0;i<plan.native_excludes.size();++i)if(std::fprintf(f,"%s\n",plan.native_excludes[i].c_str())<0){std::fclose(f);zfec::remove_utf8(path);err="cannot write temporary native exclude list: "+path;return false;}
+  if(std::fclose(f)!=0){zfec::remove_utf8(path);err="cannot close temporary native exclude list: "+path;return false;}return true;
 }
 
 inline int oec_path_kind(const std::string& p, uint64_t* size) {
 #if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
-  struct _stat64 st; if(_stat64(p.c_str(),&st)!=0) return 0; if(size)*size=(uint64_t)st.st_size; return (st.st_mode&_S_IFDIR)?2:1;
+  struct _stat64 st; if(zfec::stat64_utf8(p,&st)!=0) return 0; if(size)*size=(uint64_t)st.st_size; return (st.st_mode&_S_IFDIR)?2:1;
 #else
   struct stat st; if(stat(p.c_str(),&st)!=0) return 0; if(size)*size=(uint64_t)st.st_size; return S_ISDIR(st.st_mode)?2:(S_ISREG(st.st_mode)?1:0);
 #endif
@@ -1473,11 +1470,11 @@ inline int oec_path_kind(const std::string& p, uint64_t* size) {
 inline bool oec_walk_files(const std::string& root,const std::string& rel,std::vector<std::pair<std::string,std::string> >& out,std::string& err){
   const std::string here=rel.empty()?root:oec_path_join(root,rel);
 #if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
-  std::string pat=oec_path_join(here,"*"); struct _finddata_t fd; intptr_t h=_findfirst(pat.c_str(),&fd);
-  if(h==-1){err="cannot enumerate source directory: "+here;return false;}
-  do { std::string n=fd.name; if(n=="."||n=="..")continue; std::string r=rel.empty()?n:oec_path_join(rel,n); std::string full=oec_path_join(root,r);
-       if(fd.attrib&_A_SUBDIR){ if(!oec_walk_files(root,r,out,err)){_findclose(h);return false;} } else out.push_back(std::make_pair(oec_norm_relpath(r),full));
-  } while(_findnext(h,&fd)==0); _findclose(h); return true;
+  const std::string pat=oec_path_join(here,"*"); const std::wstring wpat=zfec::utf8_to_wide(pat,true); WIN32_FIND_DATAW fd; HANDLE h=wpat.empty()?INVALID_HANDLE_VALUE:FindFirstFileW(wpat.c_str(),&fd);
+  if(h==INVALID_HANDLE_VALUE){err="cannot enumerate source directory: "+here;return false;}
+  do { std::string n=zfec::wide_to_utf8(fd.cFileName); if(n=="."||n=="..")continue; std::string r=rel.empty()?n:oec_path_join(rel,n); std::string full=oec_path_join(root,r);
+       if(fd.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY){ if(!oec_walk_files(root,r,out,err)){FindClose(h);return false;} } else out.push_back(std::make_pair(oec_norm_relpath(r),full));
+  } while(FindNextFileW(h,&fd)); FindClose(h); return true;
 #else
   DIR* d=opendir(here.c_str()); if(!d){err="cannot enumerate source directory: "+here;return false;} struct dirent* de;
   while((de=readdir(d))!=0){ std::string n=de->d_name; if(n=="."||n=="..")continue; std::string r=rel.empty()?n:oec_path_join(rel,n), full=oec_path_join(root,r); int k=oec_path_kind(full);
@@ -1718,19 +1715,19 @@ inline bool oec_json_line_string_field(const std::string& line,const char* name,
 inline bool oec_json_line_u64_field(const std::string& line,const char* name,uint64_t& out){ std::string n=std::string("\"")+name+"\":"; size_t p=line.find(n); if(p==std::string::npos)return false;p+=n.size();size_t e=p;while(e<line.size()&&line[e]>='0'&&line[e]<='9')++e;return oec_parse_u64_digits(line.substr(p,e-p),out); }
 
 inline bool oec_load_existing_json_records(const std::string& path,std::map<std::string,OecJsonFileRecord>& out,std::string& err){
-  out.clear(); FILE* f=std::fopen(path.c_str(),"rb"); if(!f){err="cannot open existing JSON: "+path;return false;} char buf[262144];
+  out.clear(); FILE* f=zfec::fopen_utf8(path,"rb"); if(!f){err="cannot open existing JSON: "+path;return false;} char buf[262144];
   while(std::fgets(buf,sizeof(buf),f)){ std::string line=buf; if(line.find("{\"path\":")==std::string::npos)continue; OecJsonFileRecord r; if(!oec_json_line_string_field(line,"path",r.path))continue;
     oec_json_line_u64_field(line,"size",r.size); oec_json_line_string_field(line,"modified",r.modified); oec_json_line_string_field(line,"md5",r.md5); oec_json_line_string_field(line,"md5_source",r.md5_source); out[oec_norm_relpath(r.path)]=r;
   } std::fclose(f); return true;
 }
 
 inline bool oec_install_json_tmp(const std::string& tmp,const std::string& dst,bool overwrite,std::string& err){
-  if(!overwrite && path_exists(dst)){std::remove(tmp.c_str());err="output already exists, refusing to overwrite: "+dst;return false;}
+  if(!overwrite && path_exists(dst)){zfec::remove_utf8(tmp);err="output already exists, refusing to overwrite: "+dst;return false;}
 #if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
-  if(overwrite){ if(!MoveFileExA(tmp.c_str(),dst.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)){std::remove(tmp.c_str());err="cannot atomically replace JSON: "+dst;return false;} return true; }
+  if(overwrite){ if(!zfec::replace_file_utf8(tmp,dst)){zfec::remove_utf8(tmp);err="cannot atomically replace JSON: "+dst;return false;} return true; }
 #endif
-  if(overwrite) std::remove(dst.c_str());
-  if(std::rename(tmp.c_str(),dst.c_str())!=0){std::remove(tmp.c_str());err="cannot install JSON: "+dst;return false;} return true;
+  if(overwrite) zfec::remove_utf8(dst);
+  if(zfec::rename_utf8(tmp,dst)!=0){zfec::remove_utf8(tmp);err="cannot install JSON: "+dst;return false;} return true;
 }
 
 inline bool oec_write_json_catalog(const std::string& output_path, const std::string& spec,
@@ -1738,7 +1735,7 @@ inline bool oec_write_json_catalog(const std::string& output_path, const std::st
                                    const std::vector<OecJsonFileRecord>& files, std::string& err,
                                    bool overwrite=false) {
   if(!overwrite && path_exists(output_path)) { err="output already exists, refusing to overwrite: "+output_path; return false; }
-  const std::string tmp=output_path+".oecjson.tmp"; std::remove(tmp.c_str()); FILE* f=std::fopen(tmp.c_str(),"wb");
+  const std::string tmp=output_path+".oecjson.tmp"; zfec::remove_utf8(tmp); FILE* f=zfec::fopen_utf8(tmp,"wb");
   if(!f) { err="cannot create JSON output: "+tmp; return false; }
   uint64_t total=0, hashed=0; for(size_t i=0;i<files.size();++i){total+=files[i].size;if(files[i].type=="file"&&!files[i].md5.empty())++hashed;}
   bool complete=true; for(size_t i=0;i<files.size();++i)if(files[i].type=="file"&&files[i].md5.empty()){complete=false;break;}
@@ -1762,19 +1759,19 @@ inline bool oec_write_json_catalog(const std::string& output_path, const std::st
       else ok=std::fprintf(f,",\"md5\":\"%s\",\"md5_source\":\"%s\",\"hash\":{\"algorithm\":\"MD5\",\"value\":\"%s\"}}%s\n",r.md5.c_str(),oec_json_escape(r.md5_source).c_str(),r.md5.c_str(),i+1<files.size()?",":"")>=0; }
   }
   if(ok)ok=std::fprintf(f,"  ]\n}\n")>=0; if(std::fclose(f)!=0)ok=false;
-  if(!ok){std::remove(tmp.c_str());err="failed while writing JSON output: "+output_path;return false;} return oec_install_json_tmp(tmp,output_path,overwrite,err);
+  if(!ok){zfec::remove_utf8(tmp);err="failed while writing JSON output: "+output_path;return false;} return oec_install_json_tmp(tmp,output_path,overwrite,err);
 }
 
 inline bool oec_remove_tree(const std::string& root){
 #if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
-  std::string pat=oec_path_join(root,"*"); struct _finddata_t fd; intptr_t h=_findfirst(pat.c_str(),&fd); if(h!=-1){do{std::string n=fd.name;if(n=="."||n=="..")continue;std::string p=oec_path_join(root,n);if(fd.attrib&_A_SUBDIR)oec_remove_tree(p);else std::remove(p.c_str());}while(_findnext(h,&fd)==0);_findclose(h);} return _rmdir(root.c_str())==0;
+  const std::string pat=oec_path_join(root,"*");const std::wstring wpat=zfec::utf8_to_wide(pat,true);WIN32_FIND_DATAW fd;HANDLE h=wpat.empty()?INVALID_HANDLE_VALUE:FindFirstFileW(wpat.c_str(),&fd);if(h!=INVALID_HANDLE_VALUE){do{std::string n=zfec::wide_to_utf8(fd.cFileName);if(n=="."||n=="..")continue;std::string p=oec_path_join(root,n);if(fd.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)oec_remove_tree(p);else zfec::remove_utf8(p);}while(FindNextFileW(h,&fd));FindClose(h);}return zfec::rmdir_utf8(root)==0;
 #else
-  DIR* d=opendir(root.c_str()); if(d){struct dirent* de;while((de=readdir(d))!=0){std::string n=de->d_name;if(n=="."||n=="..")continue;std::string p=oec_path_join(root,n);if(oec_path_kind(p)==2)oec_remove_tree(p);else std::remove(p.c_str());}closedir(d);} return rmdir(root.c_str())==0;
+  DIR* d=opendir(root.c_str()); if(d){struct dirent* de;while((de=readdir(d))!=0){std::string n=de->d_name;if(n=="."||n=="..")continue;std::string p=oec_path_join(root,n);if(oec_path_kind(p)==2)oec_remove_tree(p);else zfec::remove_utf8(p);}closedir(d);} return rmdir(root.c_str())==0;
 #endif
 }
 inline bool oec_make_dir(const std::string& p){
 #if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
-  return _mkdir(p.c_str())==0;
+  return zfec::mkdir_utf8(p)==0;
 #else
   return mkdir(p.c_str(),0700)==0;
 #endif
@@ -2141,8 +2138,29 @@ inline void oec_quick_help(const char* exe) {
     p, p, p, p, p, p);
 }
 
+inline bool oec_windows_utf8_argv(std::vector<std::string>& owned,std::vector<const char*>& ptrs) {
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+  owned.clear();ptrs.clear();
+  typedef LPWSTR* (WINAPI *CmdToArgvFn)(LPCWSTR,int*);
+  HMODULE sh=LoadLibraryW(L"shell32.dll");if(!sh)return false;
+  CmdToArgvFn fn=reinterpret_cast<CmdToArgvFn>(GetProcAddress(sh,"CommandLineToArgvW"));if(!fn){FreeLibrary(sh);return false;}
+  int n=0;LPWSTR* wv=fn(GetCommandLineW(),&n);if(!wv||n<=0){if(wv)LocalFree(wv);FreeLibrary(sh);return false;}
+  owned.reserve((size_t)n);for(int i=0;i<n;++i)owned.push_back(zfec::wide_to_utf8(wv[i]));LocalFree(wv);FreeLibrary(sh);
+  ptrs.reserve(owned.size());for(size_t i=0;i<owned.size();++i)ptrs.push_back(owned[i].c_str());return true;
+#else
+  (void)owned;(void)ptrs;return false;
+#endif
+}
+
 inline int dispatch_const(int argc, const char* const* argv) {
   if (!argv) return kNotHandled;
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+  // The injected bridge can run before zpaqfranz's own Windows argv cleanup.
+  // Reconstruct the process command line from UTF-16 so OEC sees the same UTF-8
+  // names that native zpaqfranz uses, rather than the active ANSI code page.
+  std::vector<std::string> oec_u8_owned;std::vector<const char*> oec_u8_argv;
+  if(oec_windows_utf8_argv(oec_u8_owned,oec_u8_argv)){argc=(int)oec_u8_argv.size();argv=oec_u8_argv.data();}
+#endif
   oec_password_folder_preflight(argc, argv);
   if (argc < 2 || !argv[1]) { oec_quick_help(argc > 0 ? argv[0] : 0); return 0; }
   const std::string cmd=argv[1];

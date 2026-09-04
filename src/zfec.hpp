@@ -14,10 +14,13 @@
 #include <sstream>
 #include <iomanip>
 #include <limits>
+#include <cwchar>
 
 #if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+  #include <windows.h>
   #include <io.h>
   #include <sys/stat.h>
+  #include <direct.h>
 #else
   #include <unistd.h>
   #include <sys/stat.h>
@@ -87,8 +90,54 @@ struct VerifyStats {
 inline uint64_t div_ceil_u64(uint64_t a, uint64_t b) { return a / b + ((a % b) ? 1 : 0); }
 inline bool host_little_endian() { const uint16_t x=1; return *reinterpret_cast<const uint8_t*>(&x)==1; }
 
+// OEC stores paths as UTF-8, matching zpaq/zpaqfranz.  On Windows never pass
+// those bytes to the ANSI CRT filesystem API: it interprets them in the active
+// code page and corrupts names such as Vietnamese/Chinese/Japanese paths.
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+inline std::wstring utf8_to_wide(const std::string& s, bool path_slashes=false) {
+  if (s.empty()) return std::wstring();
+  int n=MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.c_str(), (int)s.size(), 0, 0);
+  if(n<=0) return std::wstring();
+  std::wstring w((size_t)n, L'\0');
+  if(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.c_str(), (int)s.size(), &w[0], n)!=n) return std::wstring();
+  if(path_slashes) for(size_t i=0;i<w.size();++i) if(w[i]==L'/') w[i]=L'\\';
+  return w;
+}
+inline std::string wide_to_utf8(const wchar_t* w) {
+  if(!w || !*w) return std::string();
+  int n=WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, w, -1, 0, 0, 0, 0);
+  if(n<=0) return std::string();
+  std::vector<char> b((size_t)n);
+  if(WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, w, -1, b.data(), n, 0, 0)!=n) return std::string();
+  return std::string(b.data());
+}
+inline FILE* fopen_utf8(const std::string& p,const char* mode) {
+  const std::wstring wp=utf8_to_wide(p,true), wm=utf8_to_wide(mode?std::string(mode):std::string());
+  if((!p.empty()&&wp.empty()) || wm.empty()) return 0;
+  return _wfopen(wp.c_str(),wm.c_str());
+}
+inline int stat64_utf8(const std::string& p, struct _stat64* st) {
+  const std::wstring w=utf8_to_wide(p,true); if(!p.empty()&&w.empty()) return -1; return _wstat64(w.c_str(),st);
+}
+inline int remove_utf8(const std::string& p) { const std::wstring w=utf8_to_wide(p,true); if(!p.empty()&&w.empty()) return -1; return _wremove(w.c_str()); }
+inline int rename_utf8(const std::string& a,const std::string& b) { const std::wstring wa=utf8_to_wide(a,true),wb=utf8_to_wide(b,true); if((!a.empty()&&wa.empty())||(!b.empty()&&wb.empty()))return -1; return _wrename(wa.c_str(),wb.c_str()); }
+inline int mkdir_utf8(const std::string& p) { const std::wstring w=utf8_to_wide(p,true); if(!p.empty()&&w.empty())return -1; return _wmkdir(w.c_str()); }
+inline int rmdir_utf8(const std::string& p) { const std::wstring w=utf8_to_wide(p,true); if(!p.empty()&&w.empty())return -1; return _wrmdir(w.c_str()); }
+inline bool replace_file_utf8(const std::string& src,const std::string& dst) {
+  const std::wstring ws=utf8_to_wide(src,true),wd=utf8_to_wide(dst,true);
+  if((!src.empty()&&ws.empty())||(!dst.empty()&&wd.empty()))return false;
+  return MoveFileExW(ws.c_str(),wd.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
+}
+#else
+inline FILE* fopen_utf8(const std::string& p,const char* mode){return std::fopen(p.c_str(),mode);}
+inline int remove_utf8(const std::string& p){return std::remove(p.c_str());}
+inline int rename_utf8(const std::string& a,const std::string& b){return std::rename(a.c_str(),b.c_str());}
+inline int mkdir_utf8(const std::string& p){return ::mkdir(p.c_str(),0700);}
+inline int rmdir_utf8(const std::string& p){return ::rmdir(p.c_str());}
+#endif
+
 inline bool file_exists(const std::string& p) {
-  FILE* f = std::fopen(p.c_str(), "rb");
+  FILE* f = fopen_utf8(p, "rb");
   if (!f) return false;
   std::fclose(f);
   return true;
@@ -97,7 +146,7 @@ inline bool file_exists(const std::string& p) {
 inline bool get_file_size(const std::string& p, uint64_t& out) {
 #if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
   struct _stat64 st;
-  if (_stat64(p.c_str(), &st) != 0) return false;
+  if (stat64_utf8(p, &st) != 0) return false;
   out = static_cast<uint64_t>(st.st_size);
 #else
   struct stat st;
@@ -212,10 +261,10 @@ inline bool create(const std::string& data_path, const std::string& ec_path, con
   const uint64_t window_capacity = static_cast<uint64_t>(opt.shard_size) * opt.data_shards * opt.stripes_per_window;
   const uint64_t window_count = fsize ? div_ceil_u64(fsize, window_capacity) : 1;
 
-  FILE* in = std::fopen(data_path.c_str(), "rb");
+  FILE* in = fopen_utf8(data_path, "rb");
   if (!in) { err = "cannot open input"; return false; }
   std::string tmp = ec_path + ".tmp";
-  FILE* out = std::fopen(tmp.c_str(), "wb");
+  FILE* out = fopen_utf8(tmp, "wb");
   if (!out) { std::fclose(in); err = "cannot create sidecar temp"; return false; }
 
   Header h{};
@@ -231,7 +280,7 @@ inline bool create(const std::string& data_path, const std::string& ec_path, con
   h.window_capacity = window_capacity;
   h.window_count = window_count;
   h.header_crc32c = header_crc(h);
-  if (!write_exact(out, &h, sizeof(h))) { err = "write header failed"; std::fclose(in); std::fclose(out); std::remove(tmp.c_str()); return false; }
+  if (!write_exact(out, &h, sizeof(h))) { err = "write header failed"; std::fclose(in); std::fclose(out); remove_utf8(tmp); return false; }
 
   std::vector<uint8_t> shard(opt.shard_size);
   uint64_t processed = 0;
@@ -251,7 +300,7 @@ inline bool create(const std::string& data_path, const std::string& ec_path, con
       std::fill(shard.begin(), shard.end(), 0);
       const size_t want = static_cast<size_t>(std::min<uint64_t>(opt.shard_size, bytes - window_done));
       const size_t got = std::fread(shard.data(), 1, want, in);
-      if (got != want) { err = "short read while creating sidecar"; std::fclose(in); std::fclose(out); std::remove(tmp.c_str()); return false; }
+      if (got != want) { err = "short read while creating sidecar"; std::fclose(in); std::fclose(out); remove_utf8(tmp); return false; }
       const uint32_t stripe = sidx % stripe_count;
       const uint32_t lane = sidx / stripe_count;
       data_crc[static_cast<size_t>(stripe) * opt.data_shards + lane] = crc32c(shard.data(), shard.size());
@@ -280,16 +329,16 @@ inline bool create(const std::string& data_path, const std::string& ec_path, con
 
     if (!write_exact(out, &wh, sizeof(wh)) || !write_exact(out, meta.data(), meta.size()) ||
         !write_exact(out, p.data(), p.size()) || !write_exact(out, q.data(), q.size())) {
-      err = "write sidecar window failed"; std::fclose(in); std::fclose(out); std::remove(tmp.c_str()); return false;
+      err = "write sidecar window failed"; std::fclose(in); std::fclose(out); remove_utf8(tmp); return false;
     }
     processed += bytes;
   }
 
   std::fflush(out);
   std::fclose(in);
-  if (std::fclose(out) != 0) { err = "closing sidecar failed"; std::remove(tmp.c_str()); return false; }
-  if (force) std::remove(ec_path.c_str());
-  if (std::rename(tmp.c_str(), ec_path.c_str()) != 0) { err = "rename sidecar temp failed"; std::remove(tmp.c_str()); return false; }
+  if (std::fclose(out) != 0) { err = "closing sidecar failed"; remove_utf8(tmp); return false; }
+  if (force) remove_utf8(ec_path);
+  if (rename_utf8(tmp, ec_path) != 0) { err = "rename sidecar temp failed"; remove_utf8(tmp); return false; }
   return true;
 }
 
@@ -337,14 +386,14 @@ inline uint32_t expected_shard_count(const Header& h, const WindowHeader& wh) {
 
 inline bool verify(const std::string& data_path, const std::string& ec_path, VerifyStats& stats, std::string& err, bool verbose=false) {
   stats = VerifyStats();
-  FILE* ec = std::fopen(ec_path.c_str(), "rb");
+  FILE* ec = fopen_utf8(ec_path, "rb");
   if (!ec) { err = "cannot open sidecar: " + ec_path; return false; }
   Header h{};
   if (!read_header(ec, h, err)) { std::fclose(ec); stats.ec_corrupt = true; return false; }
   uint64_t actual_size = 0;
   if (!get_file_size(data_path, actual_size)) { std::fclose(ec); err = "cannot stat data file"; return false; }
   stats.size_mismatch = actual_size != h.file_size;
-  FILE* in = std::fopen(data_path.c_str(), "rb");
+  FILE* in = fopen_utf8(data_path, "rb");
   if (!in) { std::fclose(ec); err = "cannot open data file"; return false; }
   std::vector<uint8_t> shard(h.shard_size);
   uint64_t logical_pos = 0;
@@ -406,13 +455,13 @@ inline bool copy_prefix(FILE* in, FILE* out, uint64_t bytes, std::vector<uint8_t
 }
 
 inline bool repair(const std::string& data_path, const std::string& ec_path, const std::string& output_path, std::string& err, bool verbose=false) {
-  FILE* ec = std::fopen(ec_path.c_str(), "rb");
+  FILE* ec = fopen_utf8(ec_path, "rb");
   if (!ec) { err = "cannot open sidecar"; return false; }
   Header h{};
   if (!read_header(ec, h, err)) { std::fclose(ec); return false; }
-  FILE* in = std::fopen(data_path.c_str(), "rb");
+  FILE* in = fopen_utf8(data_path, "rb");
   if (!in) { std::fclose(ec); err = "cannot open data"; return false; }
-  FILE* out = std::fopen(output_path.c_str(), "wb+");
+  FILE* out = fopen_utf8(output_path, "wb+");
   if (!out) { std::fclose(in); std::fclose(ec); err = "cannot create repair output"; return false; }
 
   uint64_t actual_size = 0; get_file_size(data_path, actual_size);
@@ -511,19 +560,19 @@ inline bool repair(const std::string& data_path, const std::string& ec_path, con
   }
   if (ok && !truncate64(out, h.file_size)) { err = "cannot truncate repair output"; ok = false; }
   std::fclose(in); std::fclose(ec); std::fflush(out); std::fclose(out);
-  if (!ok) { std::remove(output_path.c_str()); return false; }
+  if (!ok) { remove_utf8(output_path); return false; }
 
   VerifyStats st; std::string verr;
   if (!verify(output_path, ec_path, st, verr, false) || st.bad_data_shards || st.unrecoverable_stripes || st.size_mismatch) {
     err = std::string("post-repair verification failed: ") + verr;
-    std::remove(output_path.c_str());
+    remove_utf8(output_path);
     return false;
   }
   return true;
 }
 
 inline bool info(const std::string& ec_path, std::string& out, std::string& err) {
-  FILE* ec = std::fopen(ec_path.c_str(), "rb");
+  FILE* ec = fopen_utf8(ec_path, "rb");
   if (!ec) { err = "cannot open sidecar"; return false; }
   Header h{};
   bool ok = read_header(ec, h, err); std::fclose(ec);

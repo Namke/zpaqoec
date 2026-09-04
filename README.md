@@ -384,3 +384,7 @@ g++ -std=c++11 -O2 src/zfec_cli.cpp -o zfec
 ## Deep IDX dedup (0.5.0)
 
 `oec_a` enables deep dedup automatically when an IDX2 cache is available. Lookup order is RAM hot cache -> mmap FRAGMENT_TABLE -> SSD/NVMe. `--idx-memory auto` is the default; use `--idx-memory 0`, `--idx-memory 512M`, `--idx-memory 8G`, etc. Generation-based publication makes commit O(1): new fragment slots are visible inside the current add but are not published to a later process until the native ZPAQ transaction reaches its normal return path. A crash leaves an uncommitted generation which is ignored/reused later. Metadata refreshes preserve the deep EOF section. `--no-idx` disables deep lookup and uses upstream RAM dedup.
+
+### Windows Unicode path parity (r5)
+
+OEC now keeps zpaqfranz's UTF-8 path model across its own ignore/EC/IDX/JSON helpers and converts to UTF-16 Win32 filesystem/process APIs at OS boundaries. Unicode source paths such as `Kỳ's World (R.A.N.D)` no longer pass through narrow `_findfirst/_spawnv` APIs.
